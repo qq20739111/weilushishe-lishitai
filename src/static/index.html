@@ -26,14 +26,15 @@
                 <a href="#" class="brand" onclick="showSection('home')">
                     <img src="/static/logo.png" alt="Logo" class="nav-logo">
                 </a>
-                <div class="nav-links">
-                    <a href="#" onclick="showSection('activities')">活动</a>
-                    <a href="#" onclick="showSection('poems')">藏诗阁</a>
-                    <a href="#" onclick="showSection('tasks')">事务</a>
-                    <a href="#" onclick="showSection('finance')">财务</a>
-                    <a href="#" onclick="showSection('members')">社员</a>
-                    <a href="#" onclick="showSection('admin')">系统</a>
-                    <a href="#" onclick="logout()" style="color: #e74c3c;">退出</a>
+                <button class="menu-toggle" onclick="toggleMobileMenu()">☰</button>
+                <div class="nav-links" id="nav-links">
+                    <a href="#" onclick="showSection('activities'); closeMobileMenu();">活动</a>
+                    <a href="#" onclick="showSection('poems'); closeMobileMenu();">藏诗阁</a>
+                    <a href="#" onclick="showSection('tasks'); closeMobileMenu();">事务</a>
+                    <a href="#" onclick="showSection('finance'); closeMobileMenu();">财务</a>
+                    <a href="#" onclick="showSection('members'); closeMobileMenu();">社员</a>
+                    <a href="#" onclick="showSection('admin'); closeMobileMenu();">系统</a>
+                    <a href="#" onclick="logout(); closeMobileMenu();" style="color: #e74c3c;">退出</a>
                 </div>
             </div>
         </nav>
@@ -58,9 +59,21 @@
                 <div id="home-activities-list">加载中...</div>
             </div>
 
-            <div class="card">
-                <h3>今日推荐</h3>
-                <div id="daily-poem">加载中...</div>
+            <div class="home-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px;">
+                <div class="card">
+                    <h3>今日推荐</h3>
+                    <div id="daily-poem">加载中...</div>
+                </div>
+
+                <div class="card">
+                    <h3>最新诗作</h3>
+                    <div id="latest-poems-list">加载中...</div>
+                </div>
+
+                <div class="card">
+                    <h3 id="points-ranking-title">积分排行榜</h3>
+                    <div id="points-ranking-list">加载中...</div>
+                </div>
             </div>
         </section>
 
@@ -103,6 +116,37 @@
                     </select>
                     <button onclick="addCustomFieldInput()">添加字段</button>
                 </div>
+            </div>
+
+            <div class="card" style="margin-top:20px;">
+                <h3>系统设置</h3>
+                <div style="margin-bottom:15px;">
+                    <label style="display:block; font-size:0.9em; color:#666; margin-bottom:5px;">积分名称</label>
+                    <div style="display:flex; gap:10px;">
+                        <input type="text" id="setting-points-name" placeholder="围炉值" style="flex:1; margin:0;">
+                        <button onclick="savePointsName()" style="white-space:nowrap;">保存</button>
+                    </div>
+                </div>
+                <div>
+                    <label style="display:block; font-size:0.9em; color:#666; margin-bottom:5px;">密码加盐值 (Salt)</label>
+                    <div style="display:flex; gap:10px;">
+                        <input type="text" id="setting-password-salt" placeholder="weilu2018" style="flex:1; margin:0;">
+                        <button onclick="savePasswordSalt()" style="white-space:nowrap; background:#e67e22;">保存</button>
+                    </div>
+                    <p style="font-size:0.8em; color:#e74c3c; margin-top:5px;">注意：修改Salt后需要重新迁移所有密码！</p>
+                </div>
+            </div>
+
+            <div class="card" style="margin-top:20px;">
+                <h3>登录日志</h3>
+                <p style="color:#666; font-size:0.9em;">最近20条登录记录</p>
+                <div id="login-logs-list" style="max-height: 300px; overflow-y: auto;">加载中...</div>
+            </div>
+
+            <div class="card" style="margin-top:20px;">
+                <h3>数据维护</h3>
+                <p style="color:#666; font-size:0.9em;">密码安全迁移（将明文密码转换为哈希存储）</p>
+                <button onclick="migratePasswords()" style="background:#e67e22;">执行密码迁移</button>
             </div>
         </section>
 
@@ -157,7 +201,7 @@
 
         <!-- Tasks Section -->
         <section id="tasks" style="display:none;">
-            <h2>事务与积分</h2>
+            <h2 id="tasks-section-title">事务与积分</h2>
             <div id="task-list"></div>
         </section>
 
@@ -200,6 +244,14 @@
             <select id="f-type">
                 <option value="income">收入</option>
                 <option value="expense">支出</option>
+            </select>
+            <select id="f-category">
+                <option value="会费">会费</option>
+                <option value="活动费用">活动费用</option>
+                <option value="物资采购">物资采购</option>
+                <option value="稿费">稿费</option>
+                <option value="捐赠">捐赠</option>
+                <option value="其他">其他</option>
             </select>
             <input type="number" id="f-amount" placeholder="金额">
             <input type="text" id="f-summary" placeholder="摘要">

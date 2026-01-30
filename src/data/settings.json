@@ -1,1 +1,5 @@
-{"custom_member_fields": [{"id": "cf_1769341584847", "type": "date", "label": "入社日期"}]}
+{
+    "custom_member_fields": [{"id": "cf_1769341584847", "type": "date", "label": "入社日期"}],
+    "password_salt": "weilu2018",
+    "points_name": "围炉值"
+}

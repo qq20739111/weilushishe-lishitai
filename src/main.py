@@ -7,6 +7,8 @@ try:
     import gc
     import network
     import time
+    import uhashlib
+    import ubinascii
     from lib.microdot import Microdot, Response, send_file
     # from lib.SystemStatus import status_led # Optional: Uncomment if available
     print("[Init] Imports successful")
@@ -22,6 +24,27 @@ def file_exists(path):
         return True
     except OSError:
         return False
+
+def hash_password(password):
+    """使用SHA256对密码进行哈希处理（带salt）"""
+    if not password:
+        return ''
+    # 从设置中获取salt，默认为 weilu2018
+    settings = get_settings()
+    salt = settings.get('password_salt', 'weilu2018')
+    salted_password = salt + password
+    h = uhashlib.sha256(salted_password.encode('utf-8'))
+    return ubinascii.hexlify(h.digest()).decode('utf-8')
+
+def verify_password(password, hashed):
+    """验证密码是否匹配哈希值，同时支持旧版明文密码兼容"""
+    if not password or not hashed:
+        return False
+    # 如果存储的是64位哈希值，则进行哈希比较
+    if len(hashed) == 64:
+        return hash_password(password) == hashed
+    # 否则为旧版明文密码，直接比较
+    return password == hashed
 
 def simple_unquote(s):
     """Robust unquote for UTF-8 inputs"""
@@ -264,6 +287,40 @@ db_members = JsonlDB('data/members.jsonl')
 db_activities = JsonlDB('data/activities.jsonl')
 db_finance = JsonlDB('data/finance.jsonl')
 db_tasks = JsonlDB('data/tasks.jsonl')
+db_login_logs = JsonlDB('data/login_logs.jsonl')
+
+def get_current_time():
+    """获取当前时间字符串 (ISO格式近似)"""
+    t = time.localtime()
+    return "{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}".format(
+        t[0], t[1], t[2], t[3], t[4], t[5]
+    )
+
+def record_login_log(member_id, member_name, phone, status):
+    """记录登录日志"""
+    log = {
+        'id': db_login_logs.get_max_id() + 1,
+        'member_id': member_id,
+        'member_name': member_name,
+        'phone': phone[:3] + '****' + phone[-4:] if len(phone) >= 7 else phone,
+        'login_time': get_current_time(),
+        'status': status
+    }
+    db_login_logs.append(log)
+    
+    # 保留最近100条日志，清理旧日志
+    try:
+        all_logs = db_login_logs.get_all()
+        if len(all_logs) > 100:
+            # 只保留最新100条
+            keep_logs = all_logs[-100:]
+            tmp_path = db_login_logs.filepath + '.tmp'
+            with open(tmp_path, 'w') as f:
+                for l in keep_logs:
+                    f.write(json.dumps(l) + '\n')
+            os.remove(db_login_logs.filepath)
+            os.rename(tmp_path, db_login_logs.filepath)
+    except: pass
 
 # Legacy for settings (kept as simple JSON for now)
 def get_settings():
@@ -462,6 +519,10 @@ def create_member(request):
     for m in existing:
         if m.get('phone') == data.get('phone'):
             return Response('Phone exists', 400)
+    
+    # 对密码进行哈希处理
+    if 'password' in data and data['password']:
+        data['password'] = hash_password(data['password'])
             
     data['id'] = db_members.get_max_id() + 1
     db_members.append(data)
@@ -470,6 +531,11 @@ def create_member(request):
 @app.route('/api/members/update', methods=['POST'])
 def update_member_route(request):
     data = request.json
+    
+    # 如果更新密码，先进行哈希处理
+    if 'password' in data and data['password']:
+        data['password'] = hash_password(data['password'])
+    
     def updater(m):
         for k in ['name', 'alias', 'phone', 'role', 'points', 'password', 'custom']:
             if k in data: m[k] = data[k]
@@ -493,12 +559,17 @@ def login_route(request):
             for line in f:
                 try:
                     m = json.loads(line)
-                    if m.get('phone') == p and m.get('password') == pw:
+                    if m.get('phone') == p and verify_password(pw, m.get('password', '')):
                         m_safe = m.copy()
                         if 'password' in m_safe: del m_safe['password']
+                        # 记录登录成功日志
+                        record_login_log(m.get('id'), m.get('name', '未知'), p, 'success')
                         return m_safe
                 except: pass
     except: pass
+    
+    # 记录登录失败日志
+    record_login_log(None, '未知', p or '', 'failed')
     return Response('Invalid credentials', 401)
 
 # --- Finance API ---
@@ -514,6 +585,13 @@ def add_finance(request):
     db_finance.append(data)
     return data
 
+# --- Login Logs API ---
+@app.route('/api/login_logs', methods=['GET'])
+def list_login_logs(request):
+    """获取登录日志（最近20条）"""
+    items, _ = db_login_logs.fetch_page(1, 20, reverse=True)
+    return items
+
 # --- Settings ---
 @app.route('/api/settings/fields', methods=['GET', 'POST'])
 def settings_fields(request):
@@ -524,6 +602,44 @@ def settings_fields(request):
         s['custom_member_fields'] = request.json
         save_settings(s)
         return {"status": "success"}
+
+@app.route('/api/settings/system', methods=['GET', 'POST'])
+def settings_system(request):
+    """获取或更新系统设置（salt和积分名称）"""
+    s = get_settings()
+    if request.method == 'GET':
+        return {
+            "password_salt": s.get('password_salt', 'weilu2018'),
+            "points_name": s.get('points_name', '围炉值')
+        }
+    else:
+        data = request.json
+        if 'password_salt' in data:
+            s['password_salt'] = data['password_salt']
+        if 'points_name' in data:
+            s['points_name'] = data['points_name']
+        save_settings(s)
+        return {"status": "success"}
+
+# --- 密码迁移接口 (一次性使用) ---
+@app.route('/api/migrate_passwords', methods=['POST'])
+def migrate_passwords(request):
+    """将所有明文密码迁移为SHA256哈希值"""
+    migrated = 0
+    try:
+        members = db_members.get_all()
+        for m in members:
+            pwd = m.get('password', '')
+            # 如果密码不是64位哈希值，则进行迁移
+            if pwd and len(pwd) != 64:
+                def updater(record):
+                    record['password'] = hash_password(pwd)
+                if db_members.update(m.get('id'), updater):
+                    migrated += 1
+        gc.collect()
+        return {"status": "success", "migrated": migrated}
+    except Exception as e:
+        return Response(f"Migration error: {e}", 500)
 
 @app.route('/api/system/info')
 def sys_info(request):

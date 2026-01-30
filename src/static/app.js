@@ -2,6 +2,46 @@
 const API_BASE = '/api';
 let currentUser = null;
 let _customFields = [];
+let _systemSettings = { points_name: '围炉值', password_salt: 'weilu2018' };
+
+// --- 移动端菜单控制 ---
+function toggleMobileMenu() {
+    const navLinks = document.getElementById('nav-links');
+    if(navLinks) {
+        navLinks.classList.toggle('active');
+    }
+}
+
+function closeMobileMenu() {
+    const navLinks = document.getElementById('nav-links');
+    if(navLinks) {
+        navLinks.classList.remove('active');
+    }
+}
+
+// --- 加载状态和空状态 ---
+function showLoading(containerId) {
+    const container = document.getElementById(containerId);
+    if(container) {
+        container.innerHTML = '<div class="loading-spinner"></div>';
+    }
+}
+
+function showEmptyState(containerId, icon, text, btnText, btnAction) {
+    const container = document.getElementById(containerId);
+    if(container) {
+        let html = `
+            <div class="empty-state">
+                <div class="empty-state-icon">${icon}</div>
+                <div class="empty-state-text">${text}</div>
+        `;
+        if(btnText && btnAction) {
+            html += `<button class="empty-state-btn" onclick="${btnAction}">${btnText}</button>`;
+        }
+        html += '</div>';
+        container.innerHTML = html;
+    }
+}
 
 // IndexedDB Helper for Local Drafts
 const LocalDrafts = {
@@ -65,6 +105,7 @@ function checkLogin() {
         document.getElementById('login-section').style.display = 'none';
         document.getElementById('main-app').style.display = 'block';
         fetchCustomFields(); // Load custom fields schema
+        fetchSystemSettings(); // Load system settings
         showSection('home');
     } else {
         document.getElementById('login-section').style.display = 'flex';
@@ -168,6 +209,7 @@ async function fetchPoems(isLoadMore = false) {
             _poemPage = 1;
             _poemHasMore = true;
             _cachedPoems = [];
+            showLoading('poem-list');
         }
         
         if (isLoadMore && !_poemHasMore) return;
@@ -504,18 +546,26 @@ function formatRole(role) {
 }
 
 async function fetchMembers() {
+    showLoading('member-list');
+    
     try {
         const res = await fetch(`${API_BASE}/members`);
         if (!res.ok) throw new Error('Failed to fetch members');
         _cachedMembers = await res.json();
     } catch (e) {
         console.error(e);
+        showEmptyState('member-list', '😕', '加载失败，请刷新重试');
         return;
     }
 
     const container = document.getElementById('member-list');
     const canEdit = ['super_admin', 'admin', 'director'].includes(currentUser?.role);
-    const canDelete = currentUser?.role === 'super_admin'; // Only super_admin can delete for safety
+    const canDelete = currentUser?.role === 'super_admin';
+    
+    if(_cachedMembers.length === 0) {
+        showEmptyState('member-list', '👥', '暂无社员，快来录入第一位社员吧！', '录入社员', 'openMemberModal()');
+        return;
+    }
 
     container.innerHTML = _cachedMembers.map(m => `
         <div class="member-card">
@@ -526,7 +576,7 @@ async function fetchMembers() {
                 <br><small>${formatRole(m.role)}</small>
             </div>
             <div style="margin: 8px 0;">
-                <span class="points-badge">🪙 ${m.points || 0} 积分</span>
+                <span class="points-badge">🪙 ${m.points || 0} ${getPointsName()}</span>
             </div>
             <div style="display:flex; gap:8px; justify-content:center; margin-top:10px;">
                 ${canEdit ? `<button class="btn-small" onclick="editMemberClick(${m.id})" style="background:#4CAF50; color:white; padding:4px 8px; border:none; border-radius:4px; cursor:pointer;">编辑</button>` : ''}
@@ -560,6 +610,7 @@ async function openMemberModal(member = null) {
         document.getElementById('m-role').value = 'member';
         document.getElementById('m-points').value = '';
         document.getElementById('m-password').placeholder = "初始密码";
+        document.getElementById('m-points').placeholder = `初始${getPointsName()} (默认0)`;
     }
 
     // Render Custom Fields
@@ -682,14 +733,26 @@ async function fetchFinance() {
 
 let _cachedTasks = [];
 async function fetchTasks() {
+    // 动态更新标题
+    const titleEl = document.getElementById('tasks-section-title');
+    if(titleEl) {
+        titleEl.innerText = `事务与${getPointsName()}`;
+    }
+    
+    showLoading('task-list');
+    
     try {
         const res = await fetch(`${API_BASE}/tasks`);
         const tasks = await res.json();
-        _cachedTasks = tasks; // Cache for global search
+        _cachedTasks = tasks;
 
         const container = document.getElementById('task-list');
         
-        // We assume current user is "Admin" for demo, ideally you select who you are
+        if(tasks.length === 0) {
+            showEmptyState('task-list', '📋', '暂无待办事务，一切顺利！');
+            return;
+        }
+        
         container.innerHTML = tasks.map(t => {
             const isCompleted = t.status === 'completed';
         return `
@@ -697,7 +760,7 @@ async function fetchTasks() {
             <div>
                 <h4>${t.title} ${isCompleted ? '✅' : ''}</h4>
                 <p>${t.description}</p>
-                <small>奖励: <span class="task-reward">${t.reward}</span> 积分</small>
+                <small>奖励: <span class="task-reward">${t.reward}</span> ${getPointsName()}</small>
             </div>
             <div>
                 ${!isCompleted ? 
@@ -707,23 +770,35 @@ async function fetchTasks() {
             </div>
         </div>
     `}).join('');
-    } catch(e) { console.error(e); }
+    } catch(e) { 
+        console.error(e);
+        showEmptyState('task-list', '😕', '加载失败，请刷新重试');
+    }
 }
 
 async function completeTask(taskId) {
     if(!confirm('确认完成此任务？')) return;
     
-    // In a real app, you'd identify the logged-in user.
-    // Here we hardcode a user for demo purposes.
-    const currentUser = '张社长'; 
+    // 使用当前登录用户
+    const memberName = currentUser ? (currentUser.name || currentUser.alias) : '未知用户';
     
-    await fetch(`${API_BASE}/tasks/complete`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ task_id: taskId, member_name: currentUser })
-    });
-    fetchTasks();
-    alert('任务完成！积分已到账。');
+    try {
+        const res = await fetch(`${API_BASE}/tasks/complete`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ task_id: taskId, member_name: memberName })
+        });
+        
+        if(res.ok) {
+            fetchTasks();
+            alert(`任务完成！${getPointsName()}已到账。`);
+        } else {
+            alert('完成任务失败');
+        }
+    } catch(e) {
+        console.error(e);
+        alert('网络错误');
+    }
 }
 
 // --- Activities ---
@@ -731,15 +806,15 @@ let _cachedActivities = [];
 let editingActivityId = null;
 
 async function fetchActivities() {
+    const container = document.getElementById('activity-list');
+    showLoading('activity-list');
+    
     try {
         const res = await fetch(`${API_BASE}/activities`);
         _cachedActivities = await res.json();
-        const container = document.getElementById('activity-list');
-        // Cache needs to update _homeActivities too just in case? 
-        // No, openActivityDetailView checks _cachedActivities.
         
         if(_cachedActivities.length === 0) {
-            container.innerHTML = '<div style="text-align:center; padding:20px; color:#999;">暂无活动</div>';
+            showEmptyState('activity-list', '📅', '暂无活动，快来发起一个吧！', '发起活动', 'openActivityModal()');
             return;
         }
 
@@ -922,6 +997,7 @@ async function submitFinance() {
     try {
         const data = {
             type: document.getElementById('f-type').value,
+            category: document.getElementById('f-category').value,
             amount: parseFloat(document.getElementById('f-amount').value),
             summary: document.getElementById('f-summary').value,
             handler: document.getElementById('f-handler').value,
@@ -944,6 +1020,7 @@ async function submitFinance() {
         document.getElementById('f-amount').value = '';
         document.getElementById('f-summary').value = '';
         document.getElementById('f-handler').value = '';
+        document.getElementById('f-category').value = '会费';
         
         toggleModal('modal-finance');
         showSection('finance');
@@ -1100,8 +1177,87 @@ async function loadSystemInfo() {
                 console.error(e);
             }
         }
+        
+        // 加载最新诗作
+        loadLatestPoems();
+        
+        // 加载积分排行榜
+        loadPointsRanking();
+        
     } catch(e) {
         console.error(e);
+    }
+}
+
+// --- 最新诗作 ---
+async function loadLatestPoems() {
+    const container = document.getElementById('latest-poems-list');
+    if(!container) return;
+    
+    try {
+        const res = await fetch(`${API_BASE}/poems?page=1&limit=3`);
+        const poems = await res.json();
+        
+        if(poems.length === 0) {
+            container.innerHTML = '<p style="color:#666; text-align:center;">暂无诗作</p>';
+            return;
+        }
+        
+        container.innerHTML = poems.map(p => `
+            <div style="border-bottom:1px solid #eee; padding:10px 0; cursor:pointer;" onclick="showSection('poems')">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <strong style="font-size:1em;">${p.title}</strong>
+                    <span style="${getPoemTypeStyle(p.type)} padding:2px 6px; border-radius:4px; font-size:0.75em;">${p.type}</span>
+                </div>
+                <div style="font-size:0.85em; color:#888; margin-top:4px;">${p.author}</div>
+            </div>
+        `).join('');
+    } catch(e) {
+        console.error(e);
+        container.innerHTML = '<p style="color:#e74c3c;">加载失败</p>';
+    }
+}
+
+// --- 积分排行榜 ---
+async function loadPointsRanking() {
+    const container = document.getElementById('points-ranking-list');
+    if(!container) return;
+    
+    // 动态更新标题
+    const titleEl = document.getElementById('points-ranking-title');
+    if(titleEl) {
+        titleEl.innerText = `${getPointsName()}排行榜`;
+    }
+    
+    try {
+        const res = await fetch(`${API_BASE}/members`);
+        const members = await res.json();
+        
+        if(members.length === 0) {
+            container.innerHTML = '<p style="color:#666; text-align:center;">暂无社员</p>';
+            return;
+        }
+        
+        // 按积分排序，取前5名
+        const ranked = members
+            .sort((a, b) => (b.points || 0) - (a.points || 0))
+            .slice(0, 5);
+        
+        const medals = ['🥇', '🥈', '🥉', '4', '5'];
+        const pointsName = getPointsName();
+        
+        container.innerHTML = ranked.map((m, i) => `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #eee;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <span style="font-size:${i < 3 ? '1.2em' : '0.9em'}; min-width:24px; text-align:center;">${medals[i]}</span>
+                    <span style="font-weight:${i < 3 ? '600' : '400'};">${m.name}</span>
+                </div>
+                <span class="points-badge" title="${pointsName}">🪙 ${m.points || 0}</span>
+            </div>
+        `).join('');
+    } catch(e) {
+        console.error(e);
+        container.innerHTML = '<p style="color:#e74c3c;">加载失败</p>';
     }
 }
 
@@ -1250,6 +1406,80 @@ async function fetchCustomFields() {
     } catch(e) { console.error('Failed to load custom fields', e); }
 }
 
+// --- 系统设置管理 ---
+async function fetchSystemSettings() {
+    try {
+        const res = await fetch(`${API_BASE}/settings/system`);
+        if(res.ok) {
+            _systemSettings = await res.json();
+        }
+    } catch(e) { console.error('Failed to load system settings', e); }
+}
+
+function loadSystemSettingsUI() {
+    const saltInput = document.getElementById('setting-password-salt');
+    const pointsInput = document.getElementById('setting-points-name');
+    if(saltInput) saltInput.value = _systemSettings.password_salt || 'weilu2018';
+    if(pointsInput) pointsInput.value = _systemSettings.points_name || '围炉值';
+}
+
+async function savePointsName() {
+    const input = document.getElementById('setting-points-name');
+    const value = input.value.trim();
+    if(!value) { alert('积分名称不能为空'); return; }
+    
+    try {
+        const res = await fetch(`${API_BASE}/settings/system`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ points_name: value })
+        });
+        if(res.ok) {
+            _systemSettings.points_name = value;
+            alert('积分名称已更新');
+            // 刷新页面以更新所有积分显示
+            if(confirm('是否刷新页面以应用新名称？')) {
+                location.reload();
+            }
+        } else {
+            alert('保存失败');
+        }
+    } catch(e) {
+        console.error(e);
+        alert('网络错误');
+    }
+}
+
+async function savePasswordSalt() {
+    const input = document.getElementById('setting-password-salt');
+    const value = input.value.trim();
+    if(!value) { alert('Salt不能为空'); return; }
+    
+    if(!confirm('修改Salt后，所有现有密码将失效，需要重新执行密码迁移！确定要修改吗？')) return;
+    
+    try {
+        const res = await fetch(`${API_BASE}/settings/system`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ password_salt: value })
+        });
+        if(res.ok) {
+            _systemSettings.password_salt = value;
+            alert('Salt已更新，请立即执行密码迁移！');
+        } else {
+            alert('保存失败');
+        }
+    } catch(e) {
+        console.error(e);
+        alert('网络错误');
+    }
+}
+
+// 获取积分名称
+function getPointsName() {
+    return _systemSettings.points_name || '围炉值';
+}
+
 async function addCustomFieldInput() {
     const input = document.getElementById('new-field-label');
     const typeSelect = document.getElementById('new-field-type');
@@ -1295,6 +1525,9 @@ function renderAdminSettings() {
     const container = document.getElementById('settings-fields-list');
     if(!container) return;
     
+    // 加载系统设置UI
+    loadSystemSettingsUI();
+    
     if(_customFields.length === 0) {
         container.innerHTML = '<small>暂无自定义字段</small>';
         return;
@@ -1308,4 +1541,62 @@ function renderAdminSettings() {
             <button onclick="deleteCustomField('${f.id}')" style="background:#e74c3c; color:white; border:none; padding:4px 8px; border-radius:3px; cursor:pointer; font-size:0.8em;">删除</button>
         </div>
     `).join('');
+    
+    // 加载登录日志
+    fetchLoginLogs();
+}
+
+// --- 登录日志 ---
+async function fetchLoginLogs() {
+    const container = document.getElementById('login-logs-list');
+    if(!container) return;
+    
+    try {
+        const res = await fetch(`${API_BASE}/login_logs`);
+        if(!res.ok) throw new Error('Failed');
+        const logs = await res.json();
+        
+        if(logs.length === 0) {
+            container.innerHTML = '<p style="color:#999; text-align:center;">暂无登录记录</p>';
+            return;
+        }
+        
+        container.innerHTML = logs.map(log => `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #eee;">
+                <div>
+                    <span style="font-weight:500;">${log.member_name || '未知'}</span>
+                    <span style="color:#888; font-size:0.85em; margin-left:8px;">${log.phone}</span>
+                </div>
+                <div style="text-align:right;">
+                    <span class="points-badge" style="${log.status === 'success' ? 'background:#E8F5E9; color:#2E7D32;' : 'background:#FFEBEE; color:#C62828;'}">${log.status === 'success' ? '成功' : '失败'}</span>
+                    <div style="font-size:0.8em; color:#999; margin-top:4px;">${log.login_time ? log.login_time.replace('T', ' ') : ''}</div>
+                </div>
+            </div>
+        `).join('');
+    } catch(e) {
+        console.error(e);
+        container.innerHTML = '<p style="color:#e74c3c;">加载失败</p>';
+    }
+}
+
+// --- 密码迁移 ---
+async function migratePasswords() {
+    if(!confirm('确定要将所有明文密码迁移为哈希存储吗？此操作不可逆。')) return;
+    
+    try {
+        const res = await fetch(`${API_BASE}/migrate_passwords`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        });
+        
+        if(res.ok) {
+            const result = await res.json();
+            alert(`密码迁移完成！共迁移 ${result.migrated} 个账户。`);
+        } else {
+            alert('迁移失败');
+        }
+    } catch(e) {
+        console.error(e);
+        alert('网络错误');
+    }
 }
