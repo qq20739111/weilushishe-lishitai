@@ -69,6 +69,16 @@ body {
     color: var(--primary); 
 }
 
+.nav-user {
+    color: var(--accent);
+    font-weight: 600;
+    padding: 6px 12px;
+    margin-left: 10px;
+    background: rgba(0, 128, 128, 0.1);
+    border-radius: 16px;
+    font-size: 0.9em;
+}
+
 /* Main Layout */
 main { 
     margin-top: 60px; /* Increased top margin for better spacing */
@@ -150,19 +160,133 @@ button:active { transform: translateY(0); }
 /* Dashboard */
 .dashboard-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 20px;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 15px;
 }
 .dash-item {
     background: white;
-    padding: 25px;
+    padding: 18px 15px;
     border-radius: var(--radius);
     border: 1px solid var(--border);
     text-align: center;
     box-shadow: var(--shadow);
 }
-.dash-item span { display: block; color: var(--text-muted); font-size: 0.9rem; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.5px;}
-.dash-item strong { display: block; font-size: 2rem; color: var(--primary); font-weight: 800;}
+.dash-item span { display: block; color: var(--text-muted); font-size: 0.75rem; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;}
+.dash-item strong { display: block; font-size: 1.25rem; color: var(--primary); font-weight: 700;}
+
+/* System Status - Modern Style */
+.system-status-grid {
+    display: grid;
+    grid-template-columns: auto 1fr 1fr;
+    gap: 20px;
+    align-items: center;
+}
+
+.status-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.status-item .status-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.status-item .status-value {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--primary);
+}
+
+.status-bar-item {
+    min-width: 0;
+}
+
+.status-bar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.status-bar-header .status-text {
+    font-size: 0.8rem;
+    color: var(--text);
+    font-weight: 500;
+}
+
+.status-bar {
+    height: 8px;
+    background: #e9ecef;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.status-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+    background: linear-gradient(90deg, var(--accent), #00a0a0);
+}
+
+.status-bar-fill.warning {
+    background: linear-gradient(90deg, #f39c12, #e67e22);
+}
+
+.status-bar-fill.danger {
+    background: linear-gradient(90deg, #e74c3c, #c0392b);
+}
+
+/* Data Statistics Grid */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 15px;
+}
+
+.stat-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 15px;
+    background: linear-gradient(135deg, #f8f9fa, #ffffff);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+
+.stat-icon {
+    font-size: 1.5rem;
+    flex-shrink: 0;
+}
+
+.stat-info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.stat-value {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--primary);
+    line-height: 1.2;
+}
+
+.stat-name {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
 
 /* Lists & Tables */
 .header-row { 
@@ -313,6 +437,51 @@ button:active { transform: translateY(0); }
 .stat-item h4 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 5px; }
 .stat-item span { font-size: 1.2rem; font-weight: 700; color: var(--primary); }
 
+/* Finance Stats Panel */
+.finance-stats {
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    overflow: hidden;
+}
+
+.finance-balance {
+    background: linear-gradient(135deg, var(--accent), #006666);
+    color: white;
+    text-align: center;
+    padding: 20px;
+}
+
+.finance-balance h4 {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: rgba(255, 255, 255, 0.95);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+    margin-bottom: 8px;
+}
+
+.finance-balance .balance-value {
+    font-size: 2rem;
+    font-weight: 700;
+}
+
+.finance-details {
+    display: flex;
+    background: white;
+}
+
+.finance-details .stat-item {
+    flex: 1;
+    text-align: center;
+    padding: 15px;
+    border-right: 1px solid var(--border);
+}
+
+.finance-details .stat-item:last-child {
+    border-right: none;
+}
+
 /* Tasks */
 .task-item {
     display: flex;
@@ -339,8 +508,37 @@ button:active { transform: translateY(0); }
     background: var(--bg);
 }
 
-/* Mobile Optimizations */
-@media (max-width: 600px) {
+/* --- 首页三栏布局 (PC端默认) --- */
+.home-row-1 {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    align-items: stretch;
+}
+
+.home-row-1 .home-card {
+    display: flex;
+    flex-direction: column;
+}
+
+.home-row-1 .home-card h3 {
+    flex-shrink: 0;
+}
+
+.home-row-1 .home-card-content {
+    flex: 1;
+    overflow: hidden;
+}
+
+/* ========================================
+   响应式断点规范：
+   - 移动端: < 768px (max-width: 767px)
+   - 平板端: 768px - 1279px (max-width: 1279px)
+   - PC端: >= 1280px (默认样式)
+   ======================================== */
+
+/* 移动端优化 (< 768px) */
+@media (max-width: 767px) {
     .navbar {
         padding: 10px 0;
     }
@@ -385,6 +583,20 @@ button:active { transform: translateY(0); }
     .nav-links a:hover {
         background: #e9ecef;
     }
+    
+    /* 移动端用户雅号样式 - 与菜单项统一 */
+    .nav-user {
+        display: block;
+        margin: 0;
+        margin-bottom: 5px;
+        padding: 12px 16px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        text-align: center;
+        font-size: 1rem;
+        color: var(--primary);
+        font-weight: 500;
+    }
 
     .main-app {
         margin-top: 20px;
@@ -394,17 +606,132 @@ button:active { transform: translateY(0); }
     .stat-item { width: 50%; border-bottom: 1px solid var(--border); padding: 10px 0; border-right: none;}
     .stat-item:nth-child(even) { border-left: 1px solid var(--border); }
     
+    /* Finance stats mobile */
+    .finance-details {
+        flex-wrap: nowrap;
+    }
+    .finance-details .stat-item {
+        border-right: 1px solid var(--border);
+        border-bottom: none;
+    }
+    .finance-details .stat-item:last-child {
+        border-right: none;
+    }
+    
     /* Improve spacing on mobile */
     main {
         margin-top: 20px; /* Reset */
         padding-top: 20px;
     }
-}
-
-/* Prevent Zoom on Mobile Inputs */
-@media screen and (max-width: 768px) {
+    
+    /* 藏诗阁列表移动端按钮优化 */
+    .poem-meta {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    .poem-meta > div:last-child {
+        display: flex;
+        flex-shrink: 0;
+        gap: 8px;
+        margin-left: 0;
+        width: 100%;
+        justify-content: flex-end;
+    }
+    .poem-meta > div:last-child button {
+        margin-right: 0 !important;
+    }
+    
+    /* 事务列表移动端优化 */
+    .task-item {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+    .task-item > div:last-child {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        flex-wrap: nowrap;
+    }
+    .task-item > div:last-child button {
+        margin-left: 0 !important;
+        margin-right: 0 !important;
+    }
+    
+    /* 移动端输入框字体优化 - 防止iOS缩放 */
     input, select, textarea {
         font-size: 16px !important;
+    }
+    
+    /* 首页三栏移动端单列布局 */
+    .home-row-1 {
+        grid-template-columns: 1fr;
+    }
+    
+    /* 系统页面移动端适配 */
+    .dashboard-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+    }
+    .dash-item {
+        padding: 12px 10px;
+    }
+    .dash-item strong {
+        font-size: 1.1rem;
+    }
+    
+    .system-status-grid {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+    
+    .status-item:first-child {
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--border);
+    }
+    
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+    }
+    .stat-card {
+        padding: 12px;
+    }
+    .stat-icon {
+        font-size: 1.2rem;
+    }
+    .stat-value {
+        font-size: 1.1rem;
+    }
+    
+    .admin-field-row {
+        flex-wrap: wrap;
+    }
+    .admin-field-row input[type="text"] {
+        width: 100%;
+        flex: none;
+    }
+    .admin-field-row select {
+        flex: 1;
+    }
+    .admin-field-row button {
+        flex: none;
+    }
+}
+
+/* 平板端优化 (768px - 1279px) */
+@media (max-width: 1279px) {
+    /* 首页响应式：单列布局 */
+    .home-row-1 {
+        grid-template-columns: 1fr;
+    }
+    
+    /* 系统页面平板端适配 */
+    .dashboard-grid {
+        grid-template-columns: repeat(4, 1fr);
     }
 }
 
@@ -460,4 +787,133 @@ button:active { transform: translateY(0); }
 
 .empty-state-btn:hover {
     opacity: 0.9;
+}
+
+/* --- 任务状态标签 --- */
+.task-status {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.75em;
+    font-weight: 500;
+    margin-left: 8px;
+}
+
+.status-open {
+    background: #e3f2fd;
+    color: #1976d2;
+}
+
+.status-claimed {
+    background: #fff3e0;
+    color: #f57c00;
+}
+
+.status-submitted {
+    background: #fce4ec;
+    color: #c2185b;
+}
+
+.status-completed {
+    background: #e8f5e9;
+    color: #388e3c;
+}
+
+/* --- 任务操作按钮 --- */
+.task-item button {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85em;
+    transition: opacity 0.2s;
+}
+
+.task-item button:hover {
+    opacity: 0.85;
+}
+
+.btn-claim {
+    background: #2196f3;
+    color: white;
+}
+
+.btn-submit {
+    background: #ff9800;
+    color: white;
+}
+
+.btn-approve {
+    background: #4caf50;
+    color: white;
+}
+
+.btn-reject {
+    background: #9e9e9e;
+    color: white;
+    margin-left: 8px;
+}
+
+.btn-unclaim {
+    background: #607d8b;
+    color: white;
+}
+
+.btn-delete {
+    background: #f44336;
+    color: white;
+}
+
+/* --- 系统管理页面样式 --- */
+#admin h2 {
+    font-size: 1.3rem;
+    margin-bottom: 20px;
+}
+
+#admin .card h3 {
+    font-size: 1rem;
+    margin-bottom: 12px;
+}
+
+/* 自定义字段管理表单 */
+.admin-field-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.admin-field-row input,
+.admin-field-row select {
+    margin: 0;
+    padding: 10px 12px;
+    height: 40px;
+}
+
+.admin-field-row button {
+    height: 40px;
+    padding: 0 16px;
+    margin: 0;
+    white-space: nowrap;
+}
+
+/* 字段列表项 */
+.field-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    margin-bottom: 8px;
+}
+
+.field-item span {
+    font-size: 0.9rem;
+    color: var(--text);
+}
+
+.field-item button {
+    padding: 4px 10px;
+    font-size: 0.8rem;
 }

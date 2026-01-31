@@ -50,17 +50,23 @@ const LocalDrafts = {
     db: null,
     async init() {
         if (this.db) return;
+        const self = this;
         return new Promise((resolve, reject) => {
-            const request = indexedDB.open(this.dbName, 1);
-            request.onerror = e => reject(e);
+            if (!window.indexedDB) {
+                reject(new Error('浏览器不支持IndexedDB'));
+                return;
+            }
+            const request = indexedDB.open(self.dbName, 1);
+            request.onerror = e => reject(e.target.error || new Error('IndexedDB打开失败'));
+            request.onblocked = () => reject(new Error('IndexedDB被阻塞，请关闭其他标签页'));
             request.onupgradeneeded = e => {
                 const db = e.target.result;
-                if (!db.objectStoreNames.contains(this.storeName)) {
-                    db.createObjectStore(this.storeName, { keyPath: 'id' });
+                if (!db.objectStoreNames.contains(self.storeName)) {
+                    db.createObjectStore(self.storeName, { keyPath: 'id' });
                 }
             };
             request.onsuccess = e => {
-                this.db = e.target.result;
+                self.db = e.target.result;
                 resolve();
             };
         });
@@ -106,10 +112,20 @@ function checkLogin() {
         document.getElementById('main-app').style.display = 'block';
         fetchCustomFields(); // Load custom fields schema
         fetchSystemSettings(); // Load system settings
+        updateNavUser(); // Update nav user display
         showSection('home');
     } else {
         document.getElementById('login-section').style.display = 'flex';
         document.getElementById('main-app').style.display = 'none';
+    }
+}
+
+function updateNavUser() {
+    const navUserEl = document.getElementById('nav-current-user');
+    if(navUserEl && currentUser) {
+        // 优先显示雅号(alias)，没有则显示姓名(name)
+        const displayName = currentUser.alias || currentUser.name || '用户';
+        navUserEl.innerText = displayName;
     }
 }
 
@@ -142,6 +158,58 @@ function logout() {
     localStorage.removeItem('user');
     currentUser = null;
     checkLogin();
+}
+
+// --- 修改密码 ---
+function openChangePasswordModal() {
+    document.getElementById('cp-old-password').value = '';
+    document.getElementById('cp-new-password').value = '';
+    document.getElementById('cp-confirm-password').value = '';
+    toggleModal('modal-change-password');
+}
+
+async function submitChangePassword() {
+    const oldPwd = document.getElementById('cp-old-password').value;
+    const newPwd = document.getElementById('cp-new-password').value;
+    const confirmPwd = document.getElementById('cp-confirm-password').value;
+    
+    if (!oldPwd || !newPwd || !confirmPwd) {
+        alert('请填写所有密码字段');
+        return;
+    }
+    
+    if (newPwd !== confirmPwd) {
+        alert('两次输入的新密码不一致');
+        return;
+    }
+    
+    if (newPwd.length < 4) {
+        alert('新密码长度至少4位');
+        return;
+    }
+    
+    try {
+        const res = await fetch(`${API_BASE}/members/change_password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                id: currentUser.id,
+                old_password: oldPwd,
+                new_password: newPwd
+            })
+        });
+        
+        if (res.ok) {
+            alert('密码修改成功');
+            toggleModal('modal-change-password');
+        } else {
+            const data = await res.json();
+            alert('修改失败: ' + (data.error || '未知错误'));
+        }
+    } catch (e) {
+        console.error(e);
+        alert('网络错误，请重试');
+    }
 }
 
 // Navigation
@@ -230,15 +298,12 @@ async function fetchPoems(isLoadMore = false) {
         if (serverPoems.length < limit) _poemHasMore = false;
         else _poemPage++; 
 
-        // 2. Fetch Local Drafts (Show only on first page refresh, unless searching)
+        // 2. Fetch Local Drafts (Show only on first page, not when loading more or searching)
         let localDrafts = [];
-        if (!isLoadMore && _poemPage === 2 && !_poemSearchTerm) { 
-            // Logic note: _poemPage was incremented above if hasMore. 
-            // If just started (page 1 done), it is now 2. 
-            // So if (!isLoadMore), we are resetting.
+        if (!isLoadMore && !_poemSearchTerm) { 
             try {
                 localDrafts = await LocalDrafts.getAll();
-            } catch(e) { console.warn('IndexedDB not available'); }
+            } catch(e) { console.warn('IndexedDB not available:', e); }
         }
 
         // 3. Merge
@@ -369,7 +434,7 @@ function openPoemModal(poem = null) {
         editingPoemIsLocal = false;
         document.querySelector('#modal-poem h3').innerText = '撰写新作品';
         document.getElementById('p-title').value = '';
-        document.getElementById('p-type').value = '绝句';
+        document.getElementById('p-type').value = '古体诗';
         document.getElementById('p-date').value = toLocalISOString(new Date());
         document.getElementById('p-content').value = '';
         
@@ -595,7 +660,7 @@ async function openMemberModal(member = null) {
         document.getElementById('m-name').value = member.name;
         document.getElementById('m-alias').value = member.alias || '';
         document.getElementById('m-phone').value = member.phone || '';
-        document.getElementById('m-password').value = member.password || ''; 
+        document.getElementById('m-password').value = ''; // 编辑时不显示原密码 
         document.getElementById('m-role').value = member.role || 'member';
         document.getElementById('m-points').value = member.points || 0;
         // Password placeholder note
@@ -705,6 +770,13 @@ async function deleteMember(id) {
 }
 
 async function fetchFinance() {
+    // 权限控制：只有财务、管理员、超级管理员可以记账
+    const addFinanceBtn = document.getElementById('btn-add-finance');
+    if(addFinanceBtn && currentUser) {
+        const canRecord = ['super_admin', 'admin', 'finance'].includes(currentUser.role);
+        addFinanceBtn.style.display = canRecord ? 'inline-block' : 'none';
+    }
+    
     const res = await fetch(`${API_BASE}/finance`);
     const records = await res.json();
     
@@ -714,9 +786,9 @@ async function fetchFinance() {
         else expense += r.amount;
     });
     
-    document.getElementById('total-income').innerText = income;
-    document.getElementById('total-expense').innerText = expense;
-    document.getElementById('balance').innerText = income - expense;
+    document.getElementById('total-income').innerText = income.toLocaleString();
+    document.getElementById('total-expense').innerText = expense.toLocaleString();
+    document.getElementById('balance').innerText = (income - expense).toLocaleString();
     
     const tbody = document.getElementById('finance-list');
     tbody.innerHTML = records.map(r => `
@@ -739,6 +811,13 @@ async function fetchTasks() {
         titleEl.innerText = `事务与${getPointsName()}`;
     }
     
+    // 显示/隐藏发布按钮（仅理事以上可见）
+    const addTaskBtn = document.getElementById('btn-add-task');
+    if(addTaskBtn && currentUser) {
+        const canCreate = ['super_admin', 'admin', 'director'].includes(currentUser.role);
+        addTaskBtn.style.display = canCreate ? 'inline-block' : 'none';
+    }
+    
     showLoading('task-list');
     
     try {
@@ -753,34 +832,272 @@ async function fetchTasks() {
             return;
         }
         
+        const pointsName = getPointsName();
+        const userName = currentUser ? currentUser.name : '';
+        const isManager = currentUser && ['super_admin', 'admin', 'director'].includes(currentUser.role);
+        
         container.innerHTML = tasks.map(t => {
-            const isCompleted = t.status === 'completed';
-        return `
-        <div class="card task-item">
-            <div>
-                <h4>${t.title} ${isCompleted ? '✅' : ''}</h4>
-                <p>${t.description}</p>
-                <small>奖励: <span class="task-reward">${t.reward}</span> ${getPointsName()}</small>
-            </div>
-            <div>
-                ${!isCompleted ? 
-                    `<button onclick="completeTask(${t.id})">认领并完成</button>` : 
-                    `<small>由 ${t.assignee} 完成</small>`
+            const statusInfo = getTaskStatusInfo(t.status);
+            const isCreator = t.creator === userName;
+            const isAssignee = t.assignee === userName;
+            
+            let actionButtons = '';
+            
+            if(t.status === 'open') {
+                // 待领取：所有人可领取
+                actionButtons = `<button onclick="claimTask(${t.id})" class="btn-claim">领取任务</button>`;
+            } else if(t.status === 'claimed') {
+                // 进行中
+                if(isAssignee) {
+                    // 领取者：可提交或撤销
+                    actionButtons = `
+                        <button onclick="submitTaskComplete(${t.id})" class="btn-submit">提交完成</button>
+                        <button onclick="unclaimTask(${t.id})" class="btn-unclaim" style="margin-left:8px;">撤销领取</button>
+                    `;
+                } else if(isManager) {
+                    // 管理者：可撤销他人领取
+                    actionButtons = `<button onclick="unclaimTask(${t.id})" class="btn-unclaim">撤销领取</button>`;
                 }
+            } else if(t.status === 'submitted' && (isCreator || isManager)) {
+                // 待验收：发布者或管理员可审批
+                actionButtons = `
+                    <button onclick="approveTask(${t.id})" class="btn-approve">通过</button>
+                    <button onclick="rejectTask(${t.id})" class="btn-reject">退回</button>
+                `;
+            }
+            
+            // 删除按钮
+            // 管理员可删除任何状态的任务，发布者只能删除未完成的任务
+            let deleteBtn = '';
+            if(isManager || (isCreator && t.status !== 'completed')) {
+                deleteBtn = `<button onclick="deleteTask(${t.id})" class="btn-delete" style="margin-left:10px;">删除</button>`;
+            }
+            
+            return `
+            <div class="card task-item">
+                <div>
+                    <h4>${t.title} <span class="task-status ${statusInfo.className}">${statusInfo.label}</span></h4>
+                    <p>${t.description || ''}</p>
+                    <small>
+                        奖励: <span class="task-reward">${t.reward}</span> ${pointsName}
+                        ${t.creator ? `&nbsp;|&nbsp;发布者: ${t.creator}` : ''}
+                        ${t.assignee ? `&nbsp;|&nbsp;领取者: ${t.assignee}` : ''}
+                    </small>
+                </div>
+                <div style="display:flex; align-items:center;">
+                    ${actionButtons}
+                    ${deleteBtn}
+                </div>
             </div>
-        </div>
-    `}).join('');
+            `;
+        }).join('');
     } catch(e) { 
         console.error(e);
         showEmptyState('task-list', '😕', '加载失败，请刷新重试');
     }
 }
 
+function getTaskStatusInfo(status) {
+    const statusMap = {
+        'open': { label: '待领取', className: 'status-open' },
+        'claimed': { label: '进行中', className: 'status-claimed' },
+        'submitted': { label: '待验收', className: 'status-submitted' },
+        'completed': { label: '已完成', className: 'status-completed' }
+    };
+    return statusMap[status] || { label: status, className: '' };
+}
+
+function openTaskModal() {
+    document.getElementById('task-modal-title').innerText = '发布事务';
+    document.getElementById('t-title').value = '';
+    document.getElementById('t-description').value = '';
+    document.getElementById('t-reward').value = '';
+    document.getElementById('t-reward').placeholder = `奖励${getPointsName()}`;
+    toggleModal('modal-task');
+}
+
+async function submitTask() {
+    const title = document.getElementById('t-title').value.trim();
+    const description = document.getElementById('t-description').value.trim();
+    const reward = parseInt(document.getElementById('t-reward').value) || 0;
+    
+    if(!title) { alert('请填写事务标题'); return; }
+    
+    try {
+        const res = await fetch(`${API_BASE}/tasks`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                title,
+                description,
+                reward,
+                creator: currentUser.name
+            })
+        });
+        
+        if(res.ok) {
+            toggleModal('modal-task');
+            fetchTasks();
+            alert('事务发布成功！');
+        } else {
+            alert('发布失败');
+        }
+    } catch(e) {
+        console.error(e);
+        alert('网络错误');
+    }
+}
+
+async function claimTask(taskId) {
+    if(!confirm('确认领取此任务？')) return;
+    
+    try {
+        const res = await fetch(`${API_BASE}/tasks/claim`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ task_id: taskId, member_name: currentUser.name })
+        });
+        
+        if(res.ok) {
+            fetchTasks();
+            alert('任务领取成功，请尽快完成！');
+        } else {
+            alert('领取失败，任务可能已被他人领取');
+        }
+    } catch(e) {
+        console.error(e);
+        alert('网络错误');
+    }
+}
+
+async function unclaimTask(taskId) {
+    if(!confirm('确认撤销领取？任务将重新变为待领取状态。')) return;
+    
+    try {
+        const res = await fetch(`${API_BASE}/tasks/unclaim`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ task_id: taskId })
+        });
+        
+        if(res.ok) {
+            fetchTasks();
+            alert('已撤销领取');
+        } else {
+            alert('撤销失败');
+        }
+    } catch(e) {
+        console.error(e);
+        alert('网络错误');
+    }
+}
+
+async function submitTaskComplete(taskId) {
+    if(!confirm('确认提交任务？提交后将等待发布者验收。')) return;
+    
+    try {
+        const res = await fetch(`${API_BASE}/tasks/submit`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ task_id: taskId })
+        });
+        
+        if(res.ok) {
+            fetchTasks();
+            alert('任务已提交，等待验收！');
+        } else {
+            alert('提交失败');
+        }
+    } catch(e) {
+        console.error(e);
+        alert('网络错误');
+    }
+}
+
+async function approveTask(taskId) {
+    if(!confirm(`确认验收通过？通过后将发放${getPointsName()}奖励。`)) return;
+    
+    try {
+        const res = await fetch(`${API_BASE}/tasks/approve`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ task_id: taskId })
+        });
+        
+        if(res.ok) {
+            const data = await res.json();
+            fetchTasks();
+            if(data.gained > 0) {
+                alert(`验收通过！已发放 ${data.gained} ${getPointsName()}`);
+            } else {
+                alert('验收通过！');
+            }
+        } else {
+            const status = res.status;
+            if(status === 404) {
+                alert('任务不存在');
+            } else if(status === 400) {
+                alert('任务状态不正确，无法验收');
+            } else {
+                alert('验收失败');
+            }
+            fetchTasks();
+        }
+    } catch(e) {
+        console.error(e);
+        alert('网络错误');
+    }
+}
+
+async function rejectTask(taskId) {
+    if(!confirm('确认退回任务？任务将退回给领取者重做。')) return;
+    
+    try {
+        const res = await fetch(`${API_BASE}/tasks/reject`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ task_id: taskId })
+        });
+        
+        if(res.ok) {
+            fetchTasks();
+            alert('任务已退回');
+        } else {
+            alert('操作失败');
+        }
+    } catch(e) {
+        console.error(e);
+        alert('网络错误');
+    }
+}
+
+async function deleteTask(taskId) {
+    if(!confirm('确认删除此任务？此操作不可恢复。')) return;
+    
+    try {
+        const res = await fetch(`${API_BASE}/tasks/delete`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ task_id: taskId })
+        });
+        
+        if(res.ok) {
+            fetchTasks();
+            alert('任务已删除');
+        } else {
+            alert('删除失败');
+        }
+    } catch(e) {
+        console.error(e);
+        alert('网络错误');
+    }
+}
+
 async function completeTask(taskId) {
+    // 兼容旧版：直接完成任务
     if(!confirm('确认完成此任务？')) return;
     
-    // 使用当前登录用户
-    const memberName = currentUser ? (currentUser.name || currentUser.alias) : '未知用户';
+    const memberName = currentUser ? currentUser.name : '未知用户';
     
     try {
         const res = await fetch(`${API_BASE}/tasks/complete`, {
@@ -1080,8 +1397,8 @@ function openActivityDetailView(id) {
             // pass id to onclick to find it again or we can use global var
             // simplify: just onclick calls a function that finds it by id
             actionsEl.innerHTML = `
-                <button onclick="editActivityFromView(${act.id})" style="background:#4CAF50; padding:5px 10px; margin-right:10px; font-size:0.85em;">编辑</button>
-                <button onclick="deleteActivityInView(${act.id})" style="background:#e74c3c; padding:5px 10px; font-size:0.85em;">删除</button>
+                <button onclick="editActivityFromView(${act.id})" style="background:#4CAF50; padding:6px 14px; font-size:0.9em;">编辑</button>
+                <button onclick="deleteActivityInView(${act.id})" style="background:#e74c3c; padding:6px 14px; font-size:0.9em;">删除</button>
             `;
         } else {
             actionsEl.innerHTML = '';
@@ -1112,6 +1429,7 @@ async function loadSystemInfo() {
         const free = Math.round(info.free_storage / 1024);
         const total = Math.round(info.total_storage / 1024);
         const freeRam = Math.round((info.free_ram || 0) / 1024);
+        const totalRam = Math.round((info.total_ram || 2048 * 1024) / 1024);
         
         // 1. Front-end Simple Info (Home)
         const simpleEl = document.getElementById('simple-storage-info');
@@ -1119,13 +1437,30 @@ async function loadSystemInfo() {
             simpleEl.innerText = `存储空间: 剩余 ${free}KB / 总共 ${total}KB`;
         }
 
-        // 2. Back-end Admin Info (Admin Page)
+        // 2. Back-end Admin Info (Admin Page) - Progress Bar Style
         const adminPlatform = document.getElementById('admin-platform');
         if(adminPlatform) {
             adminPlatform.innerText = info.platform;
-            document.getElementById('admin-free-storage').innerText = `${free} KB`;
-            document.getElementById('admin-total-storage').innerText = `${total} KB`;
-            document.getElementById('admin-ram').innerText = `空闲 ${freeRam} KB`;
+            
+            // Storage progress bar
+            const usedStorage = total - free;
+            const storagePercent = Math.round((usedStorage / total) * 100);
+            document.getElementById('admin-storage-text').innerText = `${free} KB 可用 / ${total} KB`;
+            const storageBar = document.getElementById('admin-storage-bar');
+            storageBar.style.width = `${storagePercent}%`;
+            if(storagePercent > 90) storageBar.className = 'status-bar-fill danger';
+            else if(storagePercent > 70) storageBar.className = 'status-bar-fill warning';
+            else storageBar.className = 'status-bar-fill';
+            
+            // RAM progress bar
+            const usedRam = totalRam - freeRam;
+            const ramPercent = Math.round((usedRam / totalRam) * 100);
+            document.getElementById('admin-ram-text').innerText = `${freeRam} KB 可用 / ${totalRam} KB`;
+            const ramBar = document.getElementById('admin-ram-bar');
+            ramBar.style.width = `${ramPercent}%`;
+            if(ramPercent > 90) ramBar.className = 'status-bar-fill danger';
+            else if(ramPercent > 70) ramBar.className = 'status-bar-fill warning';
+            else ramBar.className = 'status-bar-fill';
         }
             
         // Load Daily Recommendation (Random)
@@ -1223,36 +1558,34 @@ async function loadPointsRanking() {
     const container = document.getElementById('points-ranking-list');
     if(!container) return;
     
-    // 动态更新标题
+    // 动态更新标题为年度排行榜
     const titleEl = document.getElementById('points-ranking-title');
     if(titleEl) {
-        titleEl.innerText = `${getPointsName()}排行榜`;
+        titleEl.innerText = `${getPointsName()} · 年度排行`;
     }
     
     try {
-        const res = await fetch(`${API_BASE}/members`);
-        const members = await res.json();
+        const res = await fetch(`${API_BASE}/points/yearly_ranking`);
+        const ranking = await res.json();
         
-        if(members.length === 0) {
-            container.innerHTML = '<p style="color:#666; text-align:center;">暂无社员</p>';
+        if(ranking.length === 0) {
+            container.innerHTML = '<p style="color:#666; text-align:center;">暂无年度数据</p>';
             return;
         }
-        
-        // 按积分排序，取前5名
-        const ranked = members
-            .sort((a, b) => (b.points || 0) - (a.points || 0))
-            .slice(0, 5);
         
         const medals = ['🥇', '🥈', '🥉', '4', '5'];
         const pointsName = getPointsName();
         
-        container.innerHTML = ranked.map((m, i) => `
+        // 只显示前5名
+        const top5 = ranking.slice(0, 5);
+        
+        container.innerHTML = top5.map((m, i) => `
             <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #eee;">
                 <div style="display:flex; align-items:center; gap:10px;">
                     <span style="font-size:${i < 3 ? '1.2em' : '0.9em'}; min-width:24px; text-align:center;">${medals[i]}</span>
-                    <span style="font-weight:${i < 3 ? '600' : '400'};">${m.name}</span>
+                    <span style="font-weight:${i < 3 ? '600' : '400'};">${m.alias || m.name}</span>
                 </div>
-                <span class="points-badge" title="${pointsName}">🪙 ${m.points || 0}</span>
+                <span class="points-badge" title="年度新增${pointsName}">🪙 +${m.yearly_points || 0}</span>
             </div>
         `).join('');
     } catch(e) {
@@ -1412,15 +1745,39 @@ async function fetchSystemSettings() {
         const res = await fetch(`${API_BASE}/settings/system`);
         if(res.ok) {
             _systemSettings = await res.json();
+            // 更新网页标题
+            document.title = _systemSettings.system_name || '围炉诗社·理事台';
         }
     } catch(e) { console.error('Failed to load system settings', e); }
 }
 
 function loadSystemSettingsUI() {
+    const systemNameInput = document.getElementById('setting-system-name');
     const saltInput = document.getElementById('setting-password-salt');
     const pointsInput = document.getElementById('setting-points-name');
+    if(systemNameInput) systemNameInput.value = _systemSettings.system_name || '围炉诗社·理事台';
     if(saltInput) saltInput.value = _systemSettings.password_salt || 'weilu2018';
     if(pointsInput) pointsInput.value = _systemSettings.points_name || '围炉值';
+}
+
+async function saveSystemName() {
+    const input = document.getElementById('setting-system-name');
+    const value = input.value.trim();
+    if(!value) { alert('系统名称不能为空'); return; }
+    
+    try {
+        const res = await fetch(`${API_BASE}/settings/system`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ system_name: value })
+        });
+        if(res.ok) {
+            _systemSettings.system_name = value;
+            alert('系统名称已更新');
+        } else {
+            alert('保存失败');
+        }
+    } catch(e) { console.error(e); alert('网络错误'); }
 }
 
 async function savePointsName() {
@@ -1528,6 +1885,12 @@ function renderAdminSettings() {
     // 加载系统设置UI
     loadSystemSettingsUI();
     
+    // 加载数据统计
+    loadDataStats();
+    
+    // 加载WiFi配置
+    loadWifiConfig();
+    
     if(_customFields.length === 0) {
         container.innerHTML = '<small>暂无自定义字段</small>';
         return;
@@ -1536,14 +1899,31 @@ function renderAdminSettings() {
     const typeMap = { text: '文本', number: '数字', date: '日期', email: '邮箱' };
 
     container.innerHTML = _customFields.map(f => `
-        <div style="display:flex; justify-content:space-between; align-items:center; background:#f9f9f9; padding:8px; margin-bottom:5px; border:1px solid #eee; border-radius:4px;">
-            <span style="font-weight:bold;">${f.label} <small style="color:#888; font-weight:normal">(${typeMap[f.type] || '文本'})</small></span>
-            <button onclick="deleteCustomField('${f.id}')" style="background:#e74c3c; color:white; border:none; padding:4px 8px; border-radius:3px; cursor:pointer; font-size:0.8em;">删除</button>
+        <div class="field-item">
+            <span><strong>${f.label}</strong> <small style="color:#888; font-weight:normal">(${typeMap[f.type] || '文本'})</small></span>
+            <button onclick="deleteCustomField('${f.id}')" class="delete-btn">删除</button>
         </div>
     `).join('');
     
     // 加载登录日志
     fetchLoginLogs();
+}
+
+// --- 数据统计 ---
+async function loadDataStats() {
+    try {
+        const res = await fetch(`${API_BASE}/system/stats`);
+        if(res.ok) {
+            const stats = await res.json();
+            document.getElementById('stat-members').innerText = stats.members || 0;
+            document.getElementById('stat-poems').innerText = stats.poems || 0;
+            document.getElementById('stat-activities').innerText = stats.activities || 0;
+            document.getElementById('stat-tasks').innerText = stats.tasks || 0;
+            document.getElementById('stat-finance').innerText = stats.finance || 0;
+        }
+    } catch(e) { 
+        console.error('Failed to load data stats', e); 
+    }
 }
 
 // --- 登录日志 ---
@@ -1599,4 +1979,184 @@ async function migratePasswords() {
         console.error(e);
         alert('网络错误');
     }
+}
+
+// --- WiFi 配置 ---
+function toggleStaticIpFields() {
+    const staticRadio = document.querySelector('input[name="wifi-ip-mode"][value="static"]');
+    const fields = document.getElementById('static-ip-fields');
+    if(staticRadio && fields) {
+        fields.style.display = staticRadio.checked ? 'block' : 'none';
+    }
+}
+
+async function loadWifiConfig() {
+    try {
+        const res = await fetch(`${API_BASE}/wifi/config`);
+        if(!res.ok) throw new Error('加载失败');
+        const config = await res.json();
+        
+        // STA模式配置
+        const ssidInput = document.getElementById('wifi-ssid');
+        const pwdInput = document.getElementById('wifi-password');
+        const dhcpRadio = document.querySelector('input[name="wifi-ip-mode"][value="dhcp"]');
+        const staticRadio = document.querySelector('input[name="wifi-ip-mode"][value="static"]');
+        const staIpInput = document.getElementById('wifi-sta-ip');
+        const staSubnetInput = document.getElementById('wifi-sta-subnet');
+        const staGatewayInput = document.getElementById('wifi-sta-gateway');
+        const staDnsInput = document.getElementById('wifi-sta-dns');
+        
+        if(ssidInput) ssidInput.value = config.wifi_ssid || '';
+        if(pwdInput) pwdInput.value = '';  // 不显示密码
+        
+        // 设置IP获取方式单选框
+        if(config.sta_use_static_ip) {
+            if(staticRadio) staticRadio.checked = true;
+        } else {
+            if(dhcpRadio) dhcpRadio.checked = true;
+        }
+        toggleStaticIpFields();
+        
+        if(staIpInput) staIpInput.value = config.sta_ip || '';
+        if(staSubnetInput) staSubnetInput.value = config.sta_subnet || '255.255.255.0';
+        if(staGatewayInput) staGatewayInput.value = config.sta_gateway || '';
+        if(staDnsInput) staDnsInput.value = config.sta_dns || '8.8.8.8';
+        
+        // AP模式配置
+        const apSsidInput = document.getElementById('wifi-ap-ssid');
+        const apPwdInput = document.getElementById('wifi-ap-password');
+        const apIpInput = document.getElementById('wifi-ap-ip');
+        
+        if(apSsidInput) apSsidInput.value = config.ap_ssid || '';
+        if(apPwdInput) apPwdInput.value = '';  // 不显示密码
+        if(apIpInput) apIpInput.value = config.ap_ip || '192.168.18.1';
+        
+    } catch(e) {
+        console.error(e);
+    }
+}
+
+async function saveWifiConfig() {
+    const staticRadio = document.querySelector('input[name="wifi-ip-mode"][value="static"]');
+    const config = {
+        wifi_ssid: document.getElementById('wifi-ssid')?.value || '',
+        sta_use_static_ip: staticRadio?.checked || false,
+        sta_ip: document.getElementById('wifi-sta-ip')?.value || '',
+        sta_subnet: document.getElementById('wifi-sta-subnet')?.value || '255.255.255.0',
+        sta_gateway: document.getElementById('wifi-sta-gateway')?.value || '',
+        sta_dns: document.getElementById('wifi-sta-dns')?.value || '8.8.8.8',
+        ap_ssid: document.getElementById('wifi-ap-ssid')?.value || '',
+        ap_ip: document.getElementById('wifi-ap-ip')?.value || '192.168.18.1'
+    };
+    
+    // 只有输入了密码才发送
+    const wifiPwd = document.getElementById('wifi-password')?.value;
+    if(wifiPwd) config.wifi_password = wifiPwd;
+    
+    const apPwd = document.getElementById('wifi-ap-password')?.value;
+    if(apPwd) config.ap_password = apPwd;
+    
+    if(!config.wifi_ssid) {
+        alert('请输入WiFi名称');
+        return;
+    }
+    
+    try {
+        const res = await fetch(`${API_BASE}/wifi/config`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(config)
+        });
+        
+        if(res.ok) {
+            alert('WiFi配置已保存，重启设备后生效');
+        } else {
+            const err = await res.json();
+            alert('保存失败: ' + (err.error || '未知错误'));
+        }
+    } catch(e) {
+        console.error(e);
+        alert('网络错误');
+    }
+}
+
+// --- 数据备份 ---
+async function exportBackup() {
+    try {
+        const res = await fetch(`${API_BASE}/backup/export`);
+        if(!res.ok) {
+            throw new Error('导出请求失败');
+        }
+        const backup = await res.json();
+        
+        const now = new Date();
+        const timestamp = now.getFullYear() + 
+            String(now.getMonth() + 1).padStart(2, '0') + 
+            String(now.getDate()).padStart(2, '0') + '_' +
+            String(now.getHours()).padStart(2, '0') + 
+            String(now.getMinutes()).padStart(2, '0');
+        const filename = `backup_${timestamp}.json`;
+        
+        const blob = new Blob([JSON.stringify(backup, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        
+        alert('备份导出成功');
+    } catch(e) {
+        console.error(e);
+        alert('导出失败: ' + e.message);
+    }
+}
+
+function triggerImportBackup() {
+    document.getElementById('backup-file-input').click();
+}
+
+async function importBackup(event) {
+    const file = event.target.files[0];
+    if(!file) return;
+    
+    if(!confirm('导入数据将覆盖现有所有数据，此操作不可逆！\n\n确定要继续吗？')) {
+        document.getElementById('backup-file-input').value = '';
+        return;
+    }
+    
+    try {
+        const text = await file.text();
+        let backup;
+        try {
+            backup = JSON.parse(text);
+        } catch(parseErr) {
+            throw new Error('文件格式无效，请选择正确的备份文件');
+        }
+        
+        if(!backup.version || !backup.data) {
+            throw new Error('备份文件结构不完整');
+        }
+        
+        const res = await fetch(`${API_BASE}/backup/import`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(backup)
+        });
+        
+        if(res.ok) {
+            alert('数据恢复成功，页面将刷新');
+            location.reload();
+        } else {
+            const err = await res.json();
+            throw new Error(err.error || '未知错误');
+        }
+    } catch(e) {
+        console.error(e);
+        alert('导入失败: ' + e.message);
+    }
+    
+    document.getElementById('backup-file-input').value = '';
 }

@@ -53,6 +53,21 @@ def connect_wifi():
         if wifi.connect(ssid, password):
             print(f"WiFi Connected! IP: {wifi.get_ip_address()}")
             connected = True
+            
+            # 配置静态IP（如果启用）
+            if config.get('sta_use_static_ip') and config.get('sta_ip'):
+                try:
+                    sta_ip = config.get('sta_ip')
+                    sta_subnet = config.get('sta_subnet', '255.255.255.0')
+                    sta_gateway = config.get('sta_gateway', sta_ip.rsplit('.', 1)[0] + '.1')
+                    sta_dns = config.get('sta_dns', '8.8.8.8')
+                    
+                    wlan = network.WLAN(network.STA_IF)
+                    wlan.ifconfig((sta_ip, sta_subnet, sta_gateway, sta_dns))
+                    print(f"Static IP configured: {sta_ip}")
+                except Exception as e:
+                    print(f"Static IP config failed: {e}")
+            
             break
         else:
             print(f"WiFi connection attempt {attempt+1} failed: {wifi.last_error}")
@@ -68,13 +83,13 @@ def start_ap(config):
 
     ap_ssid = config.get('ap_ssid', 'PoetrySociety_AP')
     ap_password = config.get('ap_password', 'admin1234')
+    ap_ip = config.get('ap_ip', '192.168.18.1')
     
-    # Custom IP configuration for AP
-    # Format: dict with ip, subnet, gateway, dns
+    # Custom IP configuration for AP (从配置读取)
     ap_ip_config = {
-        'ip': '192.168.18.1',
+        'ip': ap_ip,
         'subnet': '255.255.255.0',
-        'gateway': '192.168.18.1',
+        'gateway': ap_ip,
         'dns': '8.8.8.8'
     }
 
