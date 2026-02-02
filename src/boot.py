@@ -4,35 +4,42 @@ import time
 import json
 from lib.WifiConnector import WifiConnector
 from lib.SystemStatus import status_led
+from lib.Logger import log, debug, info, warn, error
+from lib.Watchdog import watchdog
 
 machine.freq(240_000_000)  # 设置为240 MHz
-print(f"当前CPU频率: {machine.freq()/1_000_000} MHz")
+info(f"当前CPU频率: {machine.freq()/1_000_000} MHz", "Boot")
 
-# Initialize global WifiConnector
-wifi = WifiConnector(debug=True)
+# 初始化看门狗
+watchdog.init()
+
+# 初始化全局 WifiConnector (debug参数与日志模块联动)
+wifi = WifiConnector(debug=log.is_debug)
 
 def load_config():
+    """加载配置文件"""
     try:
         with open('data/config.json', 'r') as f:
             return json.load(f)
     except Exception as e:
-        print("Error loading config:", e)
+        error(f"配置加载失败: {e}", "Boot")
         return None
 
 def connect_wifi():
     # Indicate connecting status
     status_led.start_connecting()
+    watchdog.feed()  # 喂狗
 
     config = load_config()
     if not config:
-        print("Config not found, skipping WiFi connection.")
+        warn("配置文件未找到，跳过WiFi连接", "Boot")
         return
 
     ssid = config.get('wifi_ssid')
     password = config.get('wifi_password')
 
     if ssid == "YOUR_WIFI_SSID":
-        print("WiFi not configured. Starting in AP mode...")
+        info("WiFi未配置，启动AP模式...", "Boot")
         start_ap(config)
         return
     
@@ -41,17 +48,18 @@ def connect_wifi():
     wifi.connect_timeout = 30  # Increase connection timeout to 30s
     wifi.max_retries = 5       # Increase max retries
     
-    print(f"Connecting to {ssid} (Timeout: {wifi.connect_timeout}s, Retries: {wifi.max_retries})...")
+    info(f"正在连接 {ssid} (超时: {wifi.connect_timeout}秒, 重试: {wifi.max_retries}次)...", "WiFi")
     
     connected = False
     for attempt in range(wifi.max_retries):
+        watchdog.feed()  # 每次尝试前喂狗
+        
         if attempt > 0:
-            print(f"Retrying connection ({attempt+1}/{wifi.max_retries})...")
-            # Rapid toggle to show activity if desired, or just wait
+            debug(f"重试连接 ({attempt+1}/{wifi.max_retries})...", "WiFi")
             time.sleep(1)
 
         if wifi.connect(ssid, password):
-            print(f"WiFi Connected! IP: {wifi.get_ip_address()}")
+            info(f"WiFi已连接! IP: {wifi.get_ip_address()}", "WiFi")
             connected = True
             
             # 配置静态IP（如果启用）
@@ -64,22 +72,41 @@ def connect_wifi():
                     
                     wlan = network.WLAN(network.STA_IF)
                     wlan.ifconfig((sta_ip, sta_subnet, sta_gateway, sta_dns))
-                    print(f"Static IP configured: {sta_ip}")
+                    info(f"静态IP已配置: {sta_ip}", "WiFi")
                 except Exception as e:
-                    print(f"Static IP config failed: {e}")
+                    warn(f"静态IP配置失败: {e}", "WiFi")
             
             break
         else:
-            print(f"WiFi connection attempt {attempt+1} failed: {wifi.last_error}")
+            debug(f"WiFi连接尝试 {attempt+1} 失败: {wifi.last_error}", "WiFi")
+            
+            # 检查是否为致命错误（密码错误或找不到AP），无需继续重试
+            last_err = wifi.last_error or ''
+            if '密码错误' in last_err or '未找到' in last_err:
+                warn(f"致命错误: {wifi.last_error}，停止重试", "WiFi")
+                break
 
     if not connected:
-        print("All WiFi connection attempts failed.")
-        print("Switching to AP mode...")
+        warn("所有WiFi连接尝试均失败", "WiFi")
+        info("切换到AP模式...", "WiFi")
+        
+        # 切换AP前，先停止STA接口，确保AP能正常启动
+        try:
+            wlan_sta = network.WLAN(network.STA_IF)
+            if wlan_sta.active():
+                wlan_sta.active(False)
+                time.sleep(0.5)
+                debug("STA接口已关闭", "WiFi")
+        except Exception as e:
+            debug(f"关闭STA失败: {e}", "WiFi")
+        
+        watchdog.feed()  # 切换AP前再喂一次狗
         start_ap(config)
 
 def start_ap(config):
     # Indicate AP status
     status_led.start_ap_mode()
+    watchdog.feed()  # 喂狗
 
     ap_ssid = config.get('ap_ssid', 'PoetrySociety_AP')
     ap_password = config.get('ap_password', 'admin1234')
@@ -93,44 +120,33 @@ def start_ap(config):
         'dns': '8.8.8.8'
     }
 
-    print(f"Starting Access Point: {ap_ssid} with IP {ap_ip_config['ip']}...")
+    info(f"正在启动热点: {ap_ssid} IP: {ap_ip_config['ip']}...", "AP")
     if wifi.create_hotspot(ap_ssid, ap_password, ip_config=ap_ip_config):
-        info = wifi.get_hotspot_info()
-        print(f"AP Started successfully. IP: {info.get('ip_address')}")
+        hotspot_info = wifi.get_hotspot_info()
+        info(f"热点启动成功! IP: {hotspot_info.get('ip_address')}", "AP")
     else:
-        print(f"Failed to start AP: {wifi.last_error}")
+        error(f"热点启动失败: {wifi.last_error}", "AP")
 
 if __name__ == '__main__':
     connect_wifi()
-    
-    # Debug: Check files and manually start main if needed
-    import os
-    print("[Boot] List of files in root:", os.listdir())
-    try:
-        print("[Boot] List of files in static:", os.listdir('static'))
-    except:
-        print("[Boot] static folder not found or empty")
-
-    print("\n" + "="*50)
-    print("⚡️ 为了方便开发调试，增加 5秒 等待时间...")
-    print("⚡️ 如果需要上传文件，请现在按 Ctrl+C 中断运行！")
-    print("="*50 + "\n")
-    time.sleep(5)
+    watchdog.feed()  # WiFi连接后喂狗
     
     try:
-        print("[Boot] Attempting to start main application...")
+        info("正在启动主应用程序...", "Boot")
         import main
         # Manually trigger the start if main.py didn't run automatically (which happens on import)
         if hasattr(main, 'app'):
             # Intelligent LED Status Update (Single LED Logic)
             if network.WLAN(network.AP_IF).active():
-                 print("[Boot] AP Mode detected. Setting LED to AP Mode (Medium Breath).")
+                 debug("检测到AP模式，设置LED为AP模式（中速呼吸）", "Boot")
                  status_led.start_ap_mode()
             else:
-                 print("[Boot] Station Mode detected. Setting LED to Running Mode (Slow Breath).")
+                 debug("检测到STA模式，设置LED为运行模式（慢速呼吸）", "Boot")
                  status_led.start_running()
             
             main.print_system_status()
-            main.app.run(port=80) or main.app.run(port=80)
+            watchdog.feed()  # 启动Web服务前喂狗
+            main.start_watchdog_timer()  # 启动定时喂狗器
+            main.app.run(port=80)
     except Exception as e:
-        print(f"[Boot] Error starting main: {e}")
+        error(f"启动主程序失败: {e}", "Boot")

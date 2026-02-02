@@ -13,8 +13,8 @@
             <div style="margin-bottom: 20px;">
                 <img src="/static/logo.png" alt="Logo" style="height: 80px;">
             </div>
-            <input type="text" id="login-phone" placeholder="手机号">
-            <input type="password" id="login-password" placeholder="密码">
+            <input type="text" id="login-phone" placeholder="手机号 *">
+            <input type="password" id="login-password" placeholder="密码 *">
             <button onclick="login()" style="width: 100%;">登录</button>
         </div>
     </section>
@@ -34,8 +34,7 @@
                     <a href="#" onclick="showSection('finance'); closeMobileMenu();">财务</a>
                     <a href="#" onclick="showSection('members'); closeMobileMenu();">社员</a>
                     <a href="#" onclick="showSection('admin'); closeMobileMenu();">系统</a>
-                    <span class="nav-user" id="nav-current-user"></span>
-                    <a href="#" onclick="openChangePasswordModal(); closeMobileMenu();">修改密码</a>
+                    <a href="#" class="nav-user-link" onclick="openProfileModal(); closeMobileMenu();" id="nav-current-user"></a>
                     <a href="#" onclick="logout(); closeMobileMenu();" style="color: #e74c3c;">退出</a>
                 </div>
             </div>
@@ -109,6 +108,28 @@
                             <div class="status-bar-fill" id="admin-ram-bar"></div>
                         </div>
                     </div>
+                    <div class="status-item">
+                        <span class="status-label">系统时间</span>
+                        <span class="status-value status-time" id="admin-system-time">-</span>
+                    </div>
+                    <div class="status-item status-bar-item">
+                        <div class="status-bar-header">
+                            <span class="status-label">CPU温度</span>
+                            <span class="status-text" id="admin-cpu-temp-text">-</span>
+                        </div>
+                        <div class="status-bar">
+                            <div class="status-bar-fill status-bar-temp" id="admin-cpu-temp-bar"></div>
+                        </div>
+                    </div>
+                    <div class="status-item status-bar-item">
+                        <div class="status-bar-header">
+                            <span class="status-label">WiFi信号</span>
+                            <span class="status-text" id="admin-wifi-signal-text">-</span>
+                        </div>
+                        <div class="status-bar">
+                            <div class="status-bar-fill status-bar-wifi" id="admin-wifi-signal-bar"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -116,35 +137,35 @@
                 <h3>数据统计</h3>
                 <div class="stats-grid" id="admin-data-stats">
                     <div class="stat-card">
-                        <span class="stat-icon">👥</span>
+                        <span class="stat-icon flat-icon icon-members"></span>
                         <div class="stat-info">
                             <span class="stat-value" id="stat-members">-</span>
                             <span class="stat-name">社员</span>
                         </div>
                     </div>
                     <div class="stat-card">
-                        <span class="stat-icon">📜</span>
+                        <span class="stat-icon flat-icon icon-poems"></span>
                         <div class="stat-info">
                             <span class="stat-value" id="stat-poems">-</span>
                             <span class="stat-name">诗作</span>
                         </div>
                     </div>
                     <div class="stat-card">
-                        <span class="stat-icon">🎉</span>
+                        <span class="stat-icon flat-icon icon-activities"></span>
                         <div class="stat-info">
                             <span class="stat-value" id="stat-activities">-</span>
                             <span class="stat-name">活动</span>
                         </div>
                     </div>
                     <div class="stat-card">
-                        <span class="stat-icon">📋</span>
+                        <span class="stat-icon flat-icon icon-tasks"></span>
                         <div class="stat-info">
                             <span class="stat-value" id="stat-tasks">-</span>
                             <span class="stat-name">事务</span>
                         </div>
                     </div>
                     <div class="stat-card">
-                        <span class="stat-icon">💰</span>
+                        <span class="stat-icon flat-icon icon-finance"></span>
                         <div class="stat-info">
                             <span class="stat-value" id="stat-finance">-</span>
                             <span class="stat-name">财务记录</span>
@@ -154,6 +175,72 @@
             </div>
 
             <div class="card" style="margin-top:20px;">
+                <h3>用户权限说明</h3>
+                <div class="role-permissions-grid">
+                    <div class="role-card">
+                        <div class="role-header" style="background: linear-gradient(135deg, #004d4d, #003d3d);">
+                            <span class="role-title">超级管理员</span>
+                        </div>
+                        <ul class="role-perms">
+                            <li>具有系统所有权限</li>
+                            <li>系统设置与Salt管理</li>
+                            <li>WiFi与AP配置管理</li>
+                            <li>数据备份与恢复</li>
+                            <li>所有用户密码管理</li>
+                        </ul>
+                    </div>
+                    <div class="role-card">
+                        <div class="role-header" style="background: linear-gradient(135deg, #006666, #005555);">
+                            <span class="role-title">管理员</span>
+                        </div>
+                        <ul class="role-perms">
+                            <li>超管外所有权限</li>
+                            <li>社员信息与角色管理</li>
+                            <li>WiFi与Salt设置</li>
+                            <li>登录日志与备份</li>
+                            <li class="perm-deny">不可改超管密码</li>
+                        </ul>
+                    </div>
+                    <div class="role-card">
+                        <div class="role-header" style="background: linear-gradient(135deg, #008080, #007070);">
+                            <span class="role-title">理事</span>
+                        </div>
+                        <ul class="role-perms">
+                            <li>发起活动与事务</li>
+                            <li>社员信息管理</li>
+                            <li>审批任务验收</li>
+                            <li class="perm-deny">不可改Salt/WiFi</li>
+                            <li class="perm-deny">不可改管理员密码</li>
+                        </ul>
+                    </div>
+                    <div class="role-card">
+                        <div class="role-header" style="background: linear-gradient(135deg, #33a3a3, #2d9090);">
+                            <span class="role-title">财务</span>
+                        </div>
+                        <ul class="role-perms">
+                            <li>普通社员权限</li>
+                            <li>财务记账操作</li>
+                            <li>收支明细管理</li>
+                            <li class="perm-deny">无管理员权限</li>
+                            <li class="perm-deny">无理事权限</li>
+                        </ul>
+                    </div>
+                    <div class="role-card">
+                        <div class="role-header" style="background: linear-gradient(135deg, #66c2c2, #55b0b0);">
+                            <span class="role-title">普通社员</span>
+                        </div>
+                        <ul class="role-perms">
+                            <li>查看诗社活动</li>
+                            <li>发布诗词作品</li>
+                            <li>认领事务任务</li>
+                            <li>查看财务公示</li>
+                            <li>管理个人资料</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card director-only-card" style="margin-top:20px;">
                 <h3>系统设置</h3>
                 <div style="margin-bottom:15px;">
                     <label style="display:block; font-size:0.85em; color:#666; margin-bottom:6px;">系统名称</label>
@@ -169,22 +256,9 @@
                         <button onclick="savePointsName()">保存</button>
                     </div>
                 </div>
-                <div style="margin-bottom:15px;">
-                    <label style="display:block; font-size:0.85em; color:#666; margin-bottom:6px;">密码加盐值 (Salt)</label>
-                    <div class="admin-field-row">
-                        <input type="text" id="setting-password-salt" placeholder="weilu2018" style="flex:1;">
-                        <button onclick="savePasswordSalt()" style="background:#e67e22;">保存</button>
-                    </div>
-                    <p style="font-size:0.8em; color:#e74c3c; margin-top:8px;">注意：修改Salt后需要重新迁移所有密码！</p>
-                </div>
-                <div>
-                    <label style="display:block; font-size:0.85em; color:#666; margin-bottom:6px;">密码迁移</label>
-                    <p style="font-size:0.8em; color:#666; margin-bottom:8px;">将明文密码转换为哈希存储</p>
-                    <button onclick="migratePasswords()" style="background:#e67e22;">执行密码迁移</button>
-                </div>
             </div>
 
-            <div class="card" style="margin-top:20px;">
+            <div class="card admin-only-card" style="margin-top:20px;">
                 <h3>WiFi 设置</h3>
                 <p style="color:#666; font-size:0.85em; margin-bottom:15px;">配置设备网络连接，支持STA客户端模式和AP热点模式。</p>
                 
@@ -194,7 +268,7 @@
                         <span style="background:var(--accent); color:#fff; width:20px; height:20px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:0.75em; margin-right:8px;">1</span>
                         STA模式（连接WiFi）
                     </h4>
-                    <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:12px; margin-bottom:15px;">
+                    <div class="wifi-form-grid" style="margin-bottom:15px;">
                         <div>
                             <label style="display:block; font-size:0.85em; color:#666; margin-bottom:4px;">WiFi名称 (SSID)</label>
                             <input type="text" id="wifi-ssid" placeholder="输入WiFi名称" style="width:100%;">
@@ -206,21 +280,27 @@
                     </div>
                     
                     <div style="margin-bottom:12px;">
-                        <label style="display:block; font-size:0.85em; color:#666; margin-bottom:8px;">IP地址获取方式</label>
-                        <div style="display:flex; gap:20px;">
-                            <label style="display:flex; align-items:center; cursor:pointer; font-size:0.9em;">
-                                <input type="radio" name="wifi-ip-mode" value="dhcp" checked onchange="toggleStaticIpFields()" style="margin-right:6px;">
-                                自动获取 (DHCP)
+                        <label style="display:block; font-size:0.85em; color:#666; margin-bottom:10px;">IP地址获取方式</label>
+                        <div class="ip-mode-selector">
+                            <label class="ip-mode-option">
+                                <input type="radio" name="wifi-ip-mode" value="dhcp" checked onchange="toggleStaticIpFields()">
+                                <span class="ip-mode-label">
+                                    <span class="ip-mode-title">自动获取</span>
+                                    <span class="ip-mode-desc">DHCP</span>
+                                </span>
                             </label>
-                            <label style="display:flex; align-items:center; cursor:pointer; font-size:0.9em;">
-                                <input type="radio" name="wifi-ip-mode" value="static" onchange="toggleStaticIpFields()" style="margin-right:6px;">
-                                静态IP
+                            <label class="ip-mode-option">
+                                <input type="radio" name="wifi-ip-mode" value="static" onchange="toggleStaticIpFields()">
+                                <span class="ip-mode-label">
+                                    <span class="ip-mode-title">静态IP</span>
+                                    <span class="ip-mode-desc">手动配置</span>
+                                </span>
                             </label>
                         </div>
                     </div>
                     
                     <div id="static-ip-fields" style="display:none; padding:15px; background:#f8f9fa; border-radius:8px; margin-top:10px;">
-                        <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:12px;">
+                        <div class="wifi-form-grid">
                             <div>
                                 <label style="display:block; font-size:0.8em; color:#666; margin-bottom:4px;">IP地址</label>
                                 <input type="text" id="wifi-sta-ip" placeholder="192.168.1.100" style="width:100%;">
@@ -248,7 +328,7 @@
                         AP模式（热点）
                     </h4>
                     <p style="font-size:0.8em; color:#888; margin-bottom:12px;">WiFi连接失败时自动启用，用于首次配置或应急访问</p>
-                    <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:12px; margin-bottom:12px;">
+                    <div class="wifi-form-grid" style="margin-bottom:12px;">
                         <div>
                             <label style="display:block; font-size:0.85em; color:#666; margin-bottom:4px;">热点名称</label>
                             <input type="text" id="wifi-ap-ssid" placeholder="围炉诗社小热点" style="width:100%;">
@@ -260,7 +340,7 @@
                     </div>
                     <div>
                         <label style="display:block; font-size:0.85em; color:#666; margin-bottom:4px;">AP模式IP地址</label>
-                        <input type="text" id="wifi-ap-ip" placeholder="192.168.18.1" style="width:50%;">
+                        <input type="text" id="wifi-ap-ip" placeholder="192.168.18.1" class="wifi-ap-ip-input">
                         <p style="font-size:0.75em; color:#999; margin-top:4px;">连接热点后，访问此IP进入系统后台</p>
                     </div>
                 </div>
@@ -272,29 +352,46 @@
                 <p style="font-size:0.8em; color:#e67e22; margin-top:12px; text-align:center;">提示：WiFi配置修改后需要重启设备才能生效</p>
             </div>
 
-            <div class="card" style="margin-top:20px;" id="admin-custom-fields">
+            <div class="card director-only-card" style="margin-top:20px;" id="admin-custom-fields">
                 <h3>社员资料自定义字段管理</h3>
-                <p style="color:#666; font-size:0.85em; margin-bottom:12px;">此处可定义所有社员的额外资料字段。</p>
-                <div id="settings-fields-list" style="margin-bottom:12px;">Loading...</div>
-                <div class="admin-field-row">
-                    <input type="text" id="new-field-label" placeholder="输入新字段名称 (如: 微信号)" style="flex:1">
-                    <select id="new-field-type" style="width: 100px;">
+                <p style="color:#666; font-size:0.85em; margin-bottom:15px;">定义社员的额外资料字段，填写后将显示在社员编辑表单中。</p>
+                <div id="settings-fields-list" class="custom-fields-list">Loading...</div>
+                <div class="custom-field-add">
+                    <input type="text" id="new-field-label" placeholder="字段名称 (如: 微信号)">
+                    <select id="new-field-type">
                         <option value="text">文本</option>
                         <option value="number">数字</option>
                         <option value="date">日期</option>
-                        <option value="email">邮箱</option>
+                        <option value="textarea">多行文本</option>
                     </select>
-                    <button onclick="addCustomFieldInput()">添加字段</button>
+                    <button onclick="addCustomFieldInput()">添加</button>
                 </div>
             </div>
 
-            <div class="card" style="margin-top:20px;">
+            <div class="card director-only-card" style="margin-top:20px;">
                 <h3>登录日志</h3>
                 <p style="color:#666; font-size:0.9em;">最近20条登录记录</p>
                 <div id="login-logs-list" style="max-height: 300px; overflow-y: auto;">加载中...</div>
             </div>
 
-            <div class="card" style="margin-top:20px;">
+            <div class="card admin-only-card" style="margin-top:20px;">
+                <h3>安全设置</h3>
+                <div style="margin-bottom:15px;">
+                    <label style="display:block; font-size:0.85em; color:#666; margin-bottom:6px;">密码加盐值 (Salt)</label>
+                    <div class="admin-field-row">
+                        <input type="text" id="setting-password-salt" placeholder="weilu2018" style="flex:1;">
+                        <button onclick="savePasswordSalt()" style="background:#e67e22;">保存</button>
+                    </div>
+                    <p style="font-size:0.8em; color:#e74c3c; margin-top:8px;">注意：修改Salt后需要重新迁移所有密码！</p>
+                </div>
+                <div>
+                    <label style="display:block; font-size:0.85em; color:#666; margin-bottom:6px;">密码迁移</label>
+                    <p style="font-size:0.8em; color:#666; margin-bottom:8px;">将明文密码转换为哈希存储</p>
+                    <button onclick="migratePasswords()" style="background:#e67e22;">执行密码迁移</button>
+                </div>
+            </div>
+
+            <div class="card admin-only-card" style="margin-top:20px;">
                 <h3>数据备份</h3>
                 <p style="color:#666; font-size:0.85em; margin-bottom:15px;">导出或导入全站数据备份，用于数据迁移或灾难恢复。</p>
                 <div style="display:flex; gap:15px; flex-wrap:wrap;">
@@ -321,9 +418,7 @@
             
             <div id="poem-list"></div>
             
-            <div style="text-align: center; margin-top: 15px;">
-                <button id="poem-load-more" onclick="showAllPoems()" style="display:none; width: 100%; padding: 10px; background: #f5f5f5; border: 1px solid #ddd; color: #666; border-radius: 8px;">查看更多作品</button>
-            </div>
+            <button id="poem-load-more" class="load-more-btn" onclick="showAllPoems()" style="display:none;">查看更多作品</button>
         </section>
 
         <!-- Activities Section -->
@@ -385,10 +480,10 @@
     <!-- Modals -->
     <div id="modal-poem" class="modal">
         <div class="modal-content">
-            <span class="close" onclick="toggleModal('modal-poem')">&times;</span>
+            <span class="close" onclick="toggleModal('modal-poem')"></span>
             <h3>发布新作</h3>
-            <input type="text" id="p-title" placeholder="诗名/标题">
-            <textarea id="p-content" placeholder="正文" rows="6"></textarea>
+            <input type="text" id="p-title" placeholder="诗名/标题 *">
+            <textarea id="p-content" placeholder="正文 *" rows="6"></textarea>
             <select id="p-type">
                 <option>古体诗</option>
                 <option>绝句</option>
@@ -399,7 +494,8 @@
                 <option>文章</option>
                 <option>其它</option>
             </select>
-            <input type="datetime-local" id="p-date" placeholder="发布时间">
+            <label for="p-date" class="date-label">发布时间</label>
+            <input type="datetime-local" id="p-date">
             
             <div id="poem-modal-actions" style="display:flex; justify-content:flex-end; gap:10px; margin-top:15px;">
                 <!-- Buttons injected by JS -->
@@ -409,7 +505,7 @@
 
     <div id="modal-finance" class="modal">
         <div class="modal-content">
-            <span class="close" onclick="toggleModal('modal-finance')">&times;</span>
+            <span class="close" onclick="toggleModal('modal-finance')"></span>
             <h3>财务记账</h3>
             <select id="f-type">
                 <option value="income">收入</option>
@@ -423,20 +519,23 @@
                 <option value="捐赠">捐赠</option>
                 <option value="其他">其他</option>
             </select>
-            <input type="number" id="f-amount" placeholder="金额">
-            <input type="text" id="f-summary" placeholder="摘要">
-            <input type="text" id="f-handler" placeholder="经办人">
+            <input type="number" id="f-amount" placeholder="金额 *">
+            <input type="text" id="f-summary" placeholder="摘要 *">
+            <input type="text" id="f-handler" placeholder="经办人 *">
             <button onclick="submitFinance()">提交</button>
         </div>
     </div>
 
     <div id="modal-task" class="modal">
         <div class="modal-content">
-            <span class="close" onclick="toggleModal('modal-task')">&times;</span>
+            <span class="close" onclick="toggleModal('modal-task')"></span>
             <h3 id="task-modal-title">发布事务</h3>
-            <input type="text" id="t-title" placeholder="事务标题">
+            <input type="text" id="t-title" placeholder="事务标题 *">
             <textarea id="t-description" placeholder="事务描述" rows="6"></textarea>
             <input type="number" id="t-reward" placeholder="奖励积分" min="0">
+            <select id="t-assignee" style="width:100%;">
+                <option value="">指派给（可选）</option>
+            </select>
             <div id="task-modal-actions" style="display:flex; justify-content:flex-end; gap:10px; margin-top:15px;">
                 <button onclick="submitTask()">发布</button>
             </div>
@@ -445,12 +544,12 @@
 
     <div id="modal-member" class="modal">
         <div class="modal-content">
-            <span class="close" onclick="toggleModal('modal-member')">&times;</span>
+            <span class="close" onclick="toggleModal('modal-member')"></span>
             <h3>录入新社员</h3>
-            <input type="text" id="m-name" placeholder="姓名">
+            <input type="text" id="m-name" placeholder="姓名 *">
             <input type="text" id="m-alias" placeholder="雅号/花名">
-            <input type="text" id="m-phone" placeholder="手机号 (用于登录)">
-            <input type="password" id="m-password" placeholder="初始密码">
+            <input type="text" id="m-phone" placeholder="手机号 *">
+            <input type="password" id="m-password" placeholder="初始密码 *">
             <select id="m-role">
                 <option value="member">普通社员</option>
                 <option value="director">理事</option>
@@ -459,29 +558,51 @@
                 <option value="super_admin">超级管理员</option>
             </select>
             <input type="number" id="m-points" placeholder="初始积分 (默认0)">
+            <label for="m-birthday" class="date-label">生日</label>
+            <input type="date" id="m-birthday">
             <div id="m-custom-fields-container" style="margin: 10px 0; border-top: 1px solid #eee; padding-top: 10px;"></div>
             <button onclick="submitMember()">保存</button>
         </div>
     </div>
 
-    <div id="modal-change-password" class="modal">
-        <div class="modal-content">
-            <span class="close" onclick="toggleModal('modal-change-password')">&times;</span>
-            <h3>修改密码</h3>
-            <input type="password" id="cp-old-password" placeholder="原密码">
-            <input type="password" id="cp-new-password" placeholder="新密码">
-            <input type="password" id="cp-confirm-password" placeholder="确认新密码">
-            <button onclick="submitChangePassword()">确认修改</button>
+    <div id="modal-profile" class="modal">
+        <div class="modal-content" style="max-width:450px;">
+            <span class="close" onclick="toggleModal('modal-profile')"></span>
+            <h3 style="margin-top:25px;">个人中心</h3>
+            
+            <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <div style="width:50px; height:50px; background:var(--accent); color:#fff; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:1.5em;" id="profile-avatar">👤</div>
+                    <div>
+                        <div style="font-weight:600; font-size:1.1em;" id="profile-display-name">-</div>
+                        <div style="color:#666; font-size:0.85em;" id="profile-role">-</div>
+                    </div>
+                </div>
+            </div>
+            
+            <input type="text" id="profile-alias" placeholder="雅号">
+            <label for="profile-birthday" class="date-label">生日</label>
+            <input type="date" id="profile-birthday">
+            <button onclick="saveProfile()" style="width:100%;">保存资料</button>
+            
+            <div style="border-top:1px solid #eee; padding-top:15px; margin-top:15px;">
+                <h4 style="font-size:0.95em; color:#333; margin-bottom:12px;">修改密码</h4>
+                <input type="password" id="profile-old-password" placeholder="原密码 *">
+                <input type="password" id="profile-new-password" placeholder="新密码 *">
+                <input type="password" id="profile-confirm-password" placeholder="确认新密码 *">
+                <button onclick="submitProfilePassword()" style="width:100%; background:#6c757d;">修改密码</button>
+            </div>
         </div>
     </div>
 
     <div id="modal-activity" class="modal">
         <div class="modal-content">
-            <span class="close" onclick="toggleModal('modal-activity')">&times;</span>
+            <span class="close" onclick="toggleModal('modal-activity')"></span>
             <h3>发起活动</h3>
-            <input type="text" id="act-title" placeholder="活动主题">
+            <input type="text" id="act-title" placeholder="活动主题 *">
             <textarea id="act-desc" placeholder="活动详情/说明" rows="6"></textarea>
-            <input type="datetime-local" id="act-date" placeholder="时间">
+            <label for="act-date" class="date-label">活动时间 *</label>
+            <input type="datetime-local" id="act-date">
             <input type="text" id="act-location" placeholder="活动地点">
             <select id="act-status">
                 <option value="筹备中">筹备中</option>
@@ -496,10 +617,10 @@
     <!-- Read-Only Activity Detail Modal -->
     <div id="modal-activity-view" class="modal">
         <div class="modal-content">
-            <span class="close" onclick="toggleModal('modal-activity-view')">&times;</span>
+            <span class="close" onclick="toggleModal('modal-activity-view')"></span>
             <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-top:35px; margin-bottom:20px;">
-                <h3 id="view-act-title" style="margin:0; line-height:1.5; flex:1; padding-right:12px;"></h3>
-                <span id="view-act-status" class="points-badge" style="flex-shrink:0; line-height:1.5;"></span>
+                <h3 id="view-act-title" style="margin:0; padding:0; flex:1; padding-right:12px;"></h3>
+                <span id="view-act-status" class="points-badge" style="flex-shrink:0; margin:0;"></span>
             </div>
             <!-- Combined Info Area -->
             <div id="view-act-container" style="color:#444;"></div>

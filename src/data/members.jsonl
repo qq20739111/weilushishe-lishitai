@@ -1,3 +1,1 @@
-{"id": 1, "phone": "13800000000", "name": "超级管理员", "password": "T1SERFFAHAHiipY6", "alias": "超级管理员", "role": "super_admin", "points": 100, "joined_at": "2024-01-01"}
-{"id": 2, "phone": "15215133855", "name": "郑永生", "password": "yongsheng", "alias": "admin", "role": "admin", "points": 9999, "joined_at": "2024-01-01"}
-{"joined_at": "2026-01-25", "alias": "七三", "custom": {"cf_1769341584847": "2026-01-22"}, "role": "member", "name": "前三", "points": 0, "password": "123", "phone": "123", "id": 3}
+{"password": "344e978b81ad80c0c3cdf04e687e9e70553cc12d088c6b562613ab73fbe5d6ba", "alias": "root", "joined_at": "2024-01-01", "role": "super_admin", "name": "超级管理员", "points": 100, "id": 1, "phone": "13800002018", "custom": {}}

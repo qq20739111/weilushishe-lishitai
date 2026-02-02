@@ -1,8 +1,78 @@
-// Constants
+/**
+ * 围炉诗社·理事台 - 前端应用脚本
+ * 
+ * 功能模块：
+ * - 用户认证：登录、登出、个人资料管理
+ * - 藏诗阁：诗歌管理（含本地草稿功能）
+ * - 活动管理：社团活动的增删改查
+ * - 事务与积分：任务认领、审批、积分记录
+ * - 财务公示：收支记录管理
+ * - 社员管理：成员信息维护
+ * - 系统后台：WiFi配置、数据备份、系统设置
+ * 
+ * 技术特性：
+ * - SPA单页应用架构
+ * - IndexedDB本地草稿存储
+ * - 响应式设计（移动端/平板/PC）
+ * - 服务端分页加载
+ */
+
+// ============================================================================
+// 全局常量和状态
+// ============================================================================
 const API_BASE = '/api';
 let currentUser = null;
 let _customFields = [];
 let _systemSettings = { points_name: '围炉值', password_salt: 'weilu2018' };
+
+// 角色权限层级（数字越小权限越高）
+const ROLE_LEVEL = {
+    'super_admin': 0,
+    'admin': 1,
+    'director': 2,
+    'finance': 2,
+    'member': 3
+};
+
+/**
+ * 检查当前用户是否可以设置目标角色
+ * @param {string} targetRole - 目标角色
+ * @returns {object} { allowed: boolean, error: string|null }
+ */
+function canAssignRole(targetRole) {
+    // 禁止任何人通过录入社员的方式添加超级管理员
+    if (targetRole === 'super_admin') {
+        return { allowed: false, error: '不能通过此方式添加超级管理员' };
+    }
+    
+    if (!currentUser || !currentUser.role) {
+        return { allowed: false, error: '未登录' };
+    }
+    
+    const myLevel = ROLE_LEVEL[currentUser.role] ?? 3;
+    const targetLevel = ROLE_LEVEL[targetRole] ?? 3;
+    
+    // 不能分配比自己权限高或相同的角色（超级管理员除外）
+    if (currentUser.role !== 'super_admin' && targetLevel <= myLevel) {
+        return { allowed: false, error: '不能添加与自己权限相同或更高的角色' };
+    }
+    
+    return { allowed: true, error: null };
+}
+
+/**
+ * 获取当前操作者ID，用于后端权限验证
+ */
+function getOperatorId() {
+    return currentUser ? currentUser.id : null;
+}
+
+/**
+ * 将operator_id添加到请求数据中
+ */
+function withOperator(data) {
+    return { ...data, operator_id: getOperatorId() };
+}
 
 // --- 移动端菜单控制 ---
 function toggleMobileMenu() {
@@ -103,11 +173,27 @@ const LocalDrafts = {
     }
 };
 
-// Login Logic
+// ============================================================================
+// 用户认证模块
+// ============================================================================
+
+/**
+ * 检查用户登录状态
+ * 从localStorage读取用户信息，如已登录则显示主应用界面
+ */
 function checkLogin() {
     const user = localStorage.getItem('user');
     if (user) {
         currentUser = JSON.parse(user);
+        // 验证用户数据完整性（必须有id字段）
+        if (!currentUser.id) {
+            // 老数据缺少id字段，需要重新登录
+            localStorage.removeItem('user');
+            currentUser = null;
+            document.getElementById('login-section').style.display = 'flex';
+            document.getElementById('main-app').style.display = 'none';
+            return;
+        }
         document.getElementById('login-section').style.display = 'none';
         document.getElementById('main-app').style.display = 'block';
         fetchCustomFields(); // Load custom fields schema
@@ -120,6 +206,10 @@ function checkLogin() {
     }
 }
 
+/**
+ * 更新导航栏用户显示
+ * 优先显示雅号(alias)，没有则显示姓名(name)
+ */
 function updateNavUser() {
     const navUserEl = document.getElementById('nav-current-user');
     if(navUserEl && currentUser) {
@@ -161,17 +251,93 @@ function logout() {
 }
 
 // --- 修改密码 ---
-function openChangePasswordModal() {
-    document.getElementById('cp-old-password').value = '';
-    document.getElementById('cp-new-password').value = '';
-    document.getElementById('cp-confirm-password').value = '';
-    toggleModal('modal-change-password');
+function openProfileModal() {
+    if(!currentUser) return;
+    
+    // 显示用户信息
+    const displayName = currentUser.alias || currentUser.name || '用户';
+    document.getElementById('profile-display-name').innerText = displayName;
+    document.getElementById('profile-role').innerText = getRoleName(currentUser.role);
+    document.getElementById('profile-avatar').innerText = displayName.charAt(0).toUpperCase();
+    
+    // 填充表单
+    document.getElementById('profile-alias').value = currentUser.alias || '';
+    document.getElementById('profile-birthday').value = currentUser.birthday || '';
+    
+    // 清空密码字段
+    document.getElementById('profile-old-password').value = '';
+    document.getElementById('profile-new-password').value = '';
+    document.getElementById('profile-confirm-password').value = '';
+    
+    toggleModal('modal-profile');
 }
 
-async function submitChangePassword() {
-    const oldPwd = document.getElementById('cp-old-password').value;
-    const newPwd = document.getElementById('cp-new-password').value;
-    const confirmPwd = document.getElementById('cp-confirm-password').value;
+function getRoleName(role) {
+    const roleMap = {
+        'super_admin': '超级管理员',
+        'admin': '管理员',
+        'director': '理事',
+        'finance': '财务',
+        'member': '社员'
+    };
+    return roleMap[role] || '社员';
+}
+
+async function saveProfile() {
+    const alias = document.getElementById('profile-alias').value.trim();
+    const birthday = document.getElementById('profile-birthday').value;
+    
+    // 检查操作者身份
+    const operatorId = getOperatorId();
+    if(!operatorId) {
+        alert('操作失败：无法获取操作者身份，请重新登录后再试');
+        return;
+    }
+    
+    try {
+        const res = await fetch(`${API_BASE}/profile/update`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                id: currentUser.id,
+                operator_id: operatorId,
+                alias: alias,
+                birthday: birthday
+            })
+        });
+        
+        if (res.ok) {
+            // 更新本地用户数据
+            currentUser.alias = alias;
+            currentUser.birthday = birthday;
+            localStorage.setItem('user', JSON.stringify(currentUser));
+            
+            // 清空成员缓存，使其他页面能够加载最新的用户信息
+            _cachedMembers = [];
+            
+            // 更新导航栏显示
+            updateNavUser();
+            
+            // 更新模态框显示
+            const displayName = alias || currentUser.name || '用户';
+            document.getElementById('profile-display-name').innerText = displayName;
+            document.getElementById('profile-avatar').innerText = displayName.charAt(0).toUpperCase();
+            
+            alert('资料保存成功');
+        } else {
+            const data = await res.json();
+            alert('保存失败: ' + (data.error || '未知错误'));
+        }
+    } catch (e) {
+        console.error(e);
+        alert('网络错误，请重试');
+    }
+}
+
+async function submitProfilePassword() {
+    const oldPwd = document.getElementById('profile-old-password').value;
+    const newPwd = document.getElementById('profile-new-password').value;
+    const confirmPwd = document.getElementById('profile-confirm-password').value;
     
     if (!oldPwd || !newPwd || !confirmPwd) {
         alert('请填写所有密码字段');
@@ -201,7 +367,10 @@ async function submitChangePassword() {
         
         if (res.ok) {
             alert('密码修改成功');
-            toggleModal('modal-change-password');
+            // 清空密码字段
+            document.getElementById('profile-old-password').value = '';
+            document.getElementById('profile-new-password').value = '';
+            document.getElementById('profile-confirm-password').value = '';
         } else {
             const data = await res.json();
             alert('修改失败: ' + (data.error || '未知错误'));
@@ -212,9 +381,16 @@ async function submitChangePassword() {
     }
 }
 
-// Navigation
+// ============================================================================
+// 页面导航模块
+// ============================================================================
 let _lastSection = 'home';
 
+/**
+ * 切换显示指定页面区块
+ * @param {string} id - 要显示的区块ID (home/poems/activities/tasks/members/finance/settings)
+ * 自动隐藏其他区块，并根据区块类型加载对应数据
+ */
 function showSection(id) {
     if(!currentUser) return; // Prevent navigation if not logged in
     
@@ -243,7 +419,22 @@ function showSection(id) {
     if(id === 'tasks') fetchTasks();
     if(id === 'home' || id === 'admin') {
         loadSystemInfo();
-        if(id === 'admin') renderAdminSettings();
+        if(id === 'admin') {
+            renderAdminSettings();
+            // 系统页权限控制
+            const role = currentUser?.role;
+            const isAdmin = ['super_admin', 'admin'].includes(role);
+            const isDirector = ['super_admin', 'admin', 'director'].includes(role);
+            
+            // 管理员级别栏目（WiFi设置、安全设置）
+            document.querySelectorAll('.admin-only-card').forEach(card => {
+                card.style.display = isAdmin ? 'block' : 'none';
+            });
+            // 理事级别栏目（系统设置、日志、备份、自定义字段）
+            document.querySelectorAll('.director-only-card').forEach(card => {
+                card.style.display = isDirector ? 'block' : 'none';
+            });
+        }
     }
 
     // Check permissions
@@ -255,23 +446,84 @@ function showSection(id) {
     if (btnAddActivity) btnAddActivity.style.display = isManager ? 'block' : 'none';
 }
 
-// Modal
+// ============================================================================
+// 模态框交互增强
+// ============================================================================
+
+// 当前打开的模态框ID（用于ESC关闭）
+let _currentOpenModal = null;
+
+/**
+ * 切换模态框显示状态
+ * @param {string} id - 模态框元素ID
+ * 支持：ESC键关闭、打开时禁止背景滚动
+ */
 function toggleModal(id) {
     const el = document.getElementById(id);
-    el.style.display = (el.style.display === 'block') ? 'none' : 'block';
+    const isOpening = el.style.display !== 'block';
+    
+    if (isOpening) {
+        // 打开模态框
+        el.style.display = 'block';
+        _currentOpenModal = id;
+        document.body.style.overflow = 'hidden'; // 禁止背景滚动
+    } else {
+        // 关闭模态框
+        el.style.display = 'none';
+        _currentOpenModal = null;
+        document.body.style.overflow = ''; // 恢复滚动
+    }
 }
 
+/**
+ * 关闭指定模态框
+ * @param {string} id - 模态框元素ID
+ */
+function closeModal(id) {
+    const el = document.getElementById(id);
+    if (el) {
+        el.style.display = 'none';
+        if (_currentOpenModal === id) {
+            _currentOpenModal = null;
+            document.body.style.overflow = '';
+        }
+    }
+}
+
+// ESC键关闭模态框
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && _currentOpenModal) {
+        closeModal(_currentOpenModal);
+    }
+});
+
+// 点击模态框背景关闭（需要模态框结构支持）
+document.addEventListener('click', function(e) {
+    if (_currentOpenModal && e.target.classList.contains('modal')) {
+        closeModal(_currentOpenModal);
+    }
+});
+
+// ============================================================================
+// 藏诗阁模块 - 诗歌管理
+// ============================================================================
 let _cachedPoems = [];
-let _poemPage = 1;         // Pagination: Current Page
-let _poemHasMore = true;   // Pagination: Has next page?
+let _poemPage = 1;         // 分页：当前页码
+let _poemHasMore = true;   // 分页：是否还有下一页
 let _showingAllPoems = false;
 let _poemSearchTerm = '';
 let editingPoemId = null;
 let editingPoemIsLocal = false;
 
-// ... existing helper ...
-
+/**
+ * 获取诗歌列表（支持分页和本地草稿）
+ * @param {boolean} isLoadMore - 是否为加载更多（true时保留现有数据）
+ * 首次加载会同时获取IndexedDB中的本地草稿
+ */
 async function fetchPoems(isLoadMore = false) {
+    // 确保成员缓存已加载（用于显示作者名称）
+    await ensureMembersCached();
+    
     try {
         if (!isLoadMore) {
             _poemPage = 1;
@@ -344,9 +596,10 @@ function renderPoems() {
         // Create if missing (it might be static html, but let's check)
         loadMoreBtn = document.createElement('button');
         loadMoreBtn.id = 'poem-load-more';
+        loadMoreBtn.className = 'load-more-btn';
         loadMoreBtn.innerText = '加载更多';
         loadMoreBtn.onclick = loadMorePoems;
-        loadMoreBtn.style = "display:none; width:100%; padding:10px; background:#eee; border:none; margin-top:10px; cursor:pointer;";
+        loadMoreBtn.style.display = 'none';
         container.parentElement.appendChild(loadMoreBtn);
     }
     
@@ -355,6 +608,12 @@ function renderPoems() {
         loadMoreBtn.innerText = '加载更多...';
     } else {
         loadMoreBtn.style.display = 'none';
+    }
+
+    // 空数据时显示友好提示
+    if (displayList.length === 0) {
+        showEmptyState('poem-list', '📜', '诗阁暂无收藏，快来创作第一首诗吧！', '开始创作', 'openPoemModal()');
+        return;
     }
 
     // Render
@@ -378,7 +637,7 @@ function renderPoems() {
             <div class="poem-meta" style="align-items:center;">
                 <div style="display:flex; align-items:center; flex-wrap:wrap; gap:10px;">
                     <span style="${getPoemTypeStyle(p.type)} padding:2px 8px; border-radius:4px; font-size:0.85em;">${p.type}</span>
-                    <span style="color:#555;">${p.author}</span>
+                    <span style="color:#555;">${getSmartDisplayName(p.author_id, p.author)}</span>
                     <span style="color:#999; font-size:0.9em;">${displayDate}</span>
                 </div>
                 ${ canManage ? `
@@ -419,7 +678,7 @@ function openPoemModal(poem = null) {
         if (editingPoemIsLocal) {
             // Edit Draft: Save Draft, Publish
             actionContainer.innerHTML = `
-                <button onclick="saveDraft()" style="background:#FFA000; color:white;">保存草稿</button>
+                <button onclick="saveDraft()" style="background:#FFA000; color:white;">暂存草稿</button>
                 <button onclick="publishPoem()">发布到藏诗阁</button>
             `;
         } else {
@@ -440,7 +699,7 @@ function openPoemModal(poem = null) {
         
         // New Poem: Save Draft, Publish
         actionContainer.innerHTML = `
-            <button onclick="saveDraft()" style="background:#FFA000; color:white;">保存草稿</button>
+            <button onclick="saveDraft()" style="background:#FFA000; color:white;">暂存草稿</button>
             <button onclick="publishPoem()">发布到藏诗阁</button>
         `;
     }
@@ -484,6 +743,7 @@ async function publishPoem() {
     const poemData = {
         title, type, content,
         author: currentUser.alias || currentUser.name,
+        author_id: currentUser.id,  // 保存作者ID用于动态显示
         date: date || toLocalISOString(new Date())
     };
 
@@ -594,6 +854,58 @@ async function deletePoemWrapper(id, isLocal) {
 
 let _cachedMembers = [];
 
+/**
+ * 确保成员缓存已加载（用于动态显示用户名称）
+ * 如果缓存为空，则从服务器加载
+ */
+async function ensureMembersCached() {
+    if (_cachedMembers.length === 0) {
+        try {
+            const res = await fetch(`${API_BASE}/members`);
+            if (res.ok) _cachedMembers = await res.json();
+        } catch (e) {
+            console.warn('加载成员缓存失败:', e);
+        }
+    }
+}
+
+// 根据用户姓名获取显示名称（优先雅号）
+function getDisplayNameByName(name) {
+    if (!name) return '';
+    const member = _cachedMembers.find(m => m.name === name);
+    return member ? (member.alias || member.name) : name;
+}
+
+/**
+ * 根据member_id获取显示名称（优先雅号）
+ * @param {number} memberId - 成员ID
+ * @returns {string} 显示名称
+ */
+function getDisplayNameById(memberId) {
+    if (!memberId) return '';
+    const member = _cachedMembers.find(m => m.id === memberId);
+    return member ? (member.alias || member.name) : '';
+}
+
+/**
+ * 智能获取显示名称：优先通过ID查找，回退到名称字符串
+ * @param {number|null} memberId - 成员ID（可选）
+ * @param {string|null} fallbackName - 回退名称（当ID查不到时使用）
+ * @returns {string} 显示名称
+ */
+function getSmartDisplayName(memberId, fallbackName) {
+    if (memberId) {
+        const name = getDisplayNameById(memberId);
+        if (name) return name;
+    }
+    // 回退：尝试通过名称查找成员（可能是老数据存储的是alias）
+    if (fallbackName) {
+        const member = _cachedMembers.find(m => m.name === fallbackName || m.alias === fallbackName);
+        if (member) return member.alias || member.name;
+    }
+    return fallbackName || '';
+}
+
 function editMemberClick(id) {
     const member = _cachedMembers.find(m => m.id === id);
     if (member) openMemberModal(member);
@@ -610,6 +922,14 @@ function formatRole(role) {
     return roleMap[role] || role || '社员';
 }
 
+// ============================================================================
+// 社员管理模块
+// ============================================================================
+
+/**
+ * 获取社员列表并渲染
+ * 根据当前用户角色显示编辑/删除按钮
+ */
 async function fetchMembers() {
     showLoading('member-list');
     
@@ -632,23 +952,27 @@ async function fetchMembers() {
         return;
     }
 
-    container.innerHTML = _cachedMembers.map(m => `
+    container.innerHTML = _cachedMembers.map(m => {
+        const displayName = m.alias || m.name;
+        return `
         <div class="member-card">
-            <div class="member-avatar">🤠</div>
-            <h4>${m.name}</h4>
+            <div class="member-avatar">${displayName.charAt(0)}</div>
+            <h4>${displayName}</h4>
             <div class="member-role">
-                ${m.alias || ''}
-                <br><small>${formatRole(m.role)}</small>
+                ${m.alias ? m.name : ''}<br>
+                <small>${formatRole(m.role)}</small>
             </div>
-            <div style="margin: 8px 0;">
-                <span class="points-badge">🪙 ${m.points || 0} ${getPointsName()}</span>
+            <div style="margin: 10px 0;">
+                <span class="points-badge">${m.points || 0} ${getPointsName()}</span>
             </div>
-            <div style="display:flex; gap:8px; justify-content:center; margin-top:10px;">
-                ${canEdit ? `<button class="btn-small" onclick="editMemberClick(${m.id})" style="background:#4CAF50; color:white; padding:4px 8px; border:none; border-radius:4px; cursor:pointer;">编辑</button>` : ''}
-                ${canDelete ? `<button class="delete-btn" onclick="deleteMember(${m.id})" style="padding:4px 8px;">移除</button>` : ''}
+            ${(canEdit || canDelete) ? `
+            <div class="member-actions">
+                ${canEdit ? `<button class="btn-edit" onclick="editMemberClick(${m.id})">编辑</button>` : ''}
+                ${canDelete ? `<button class="btn-remove" onclick="deleteMember(${m.id})">移除</button>` : ''}
             </div>
+            ` : ''}
         </div>
-    `).join('');
+    `}).join('');
 }
 
 let editingMemberId = null;
@@ -663,7 +987,8 @@ async function openMemberModal(member = null) {
         document.getElementById('m-password').value = ''; // 编辑时不显示原密码 
         document.getElementById('m-role').value = member.role || 'member';
         document.getElementById('m-points').value = member.points || 0;
-        // Password placeholder note
+        document.getElementById('m-birthday').value = member.birthday || '';
+        // 编辑时密码非必填
         document.getElementById('m-password').placeholder = "留空则不修改密码";
     } else {
         editingMemberId = null;
@@ -674,7 +999,9 @@ async function openMemberModal(member = null) {
         document.getElementById('m-password').value = '';
         document.getElementById('m-role').value = 'member';
         document.getElementById('m-points').value = '';
-        document.getElementById('m-password').placeholder = "初始密码";
+        document.getElementById('m-birthday').value = '';
+        // 新建时密码必填
+        document.getElementById('m-password').placeholder = "初始密码 *";
         document.getElementById('m-points').placeholder = `初始${getPointsName()} (默认0)`;
     }
 
@@ -683,10 +1010,13 @@ async function openMemberModal(member = null) {
     if (customContainer) {
         customContainer.innerHTML = _customFields.map(f => {
             const val = (member && member.custom && member.custom[f.id]) ? member.custom[f.id] : '';
-            return `<div style="margin-bottom:8px;">
-                        <label style="font-size:0.8em; color:#666;">${f.label}</label>
-                        <input type="${f.type || 'text'}" class="custom-field-input" data-id="${f.id}" placeholder="${f.label}" value="${val}" style="width:100%; box-sizing:border-box;">
-                    </div>`;
+            if (f.type === 'textarea') {
+                return `<textarea class="custom-field-input" data-id="${f.id}" placeholder="${f.label}" rows="2" style="width:100%; box-sizing:border-box; margin-bottom:8px;">${val}</textarea>`;
+            } else if (f.type === 'date') {
+                return `<div style="margin-bottom:8px;"><label class="date-label">${f.label}</label><input type="date" class="custom-field-input" data-id="${f.id}" value="${val}" style="width:100%; box-sizing:border-box;"></div>`;
+            } else {
+                return `<input type="${f.type || 'text'}" class="custom-field-input" data-id="${f.id}" placeholder="${f.label}" value="${val}" style="width:100%; box-sizing:border-box; margin-bottom:8px;">`;
+            }
         }).join('');
     }
 
@@ -705,8 +1035,16 @@ async function submitMember() {
             alias: document.getElementById('m-alias').value,
             phone: document.getElementById('m-phone').value,
             role: document.getElementById('m-role').value,
-            points: parseInt(document.getElementById('m-points').value || 0)
+            points: parseInt(document.getElementById('m-points').value || 0),
+            birthday: document.getElementById('m-birthday').value
         };
+        
+        // 前端角色权限验证
+        const roleCheck = canAssignRole(data.role);
+        if (!roleCheck.allowed) {
+            alert(roleCheck.error);
+            return;
+        }
         
         // Collect Custom Fields
         const customData = {};
@@ -729,11 +1067,11 @@ async function submitMember() {
             const response = await fetch(`${API_BASE}/members`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(data)
+                body: JSON.stringify(withOperator(data))
             });
             if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(errorText);
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || '添加失败');
             }
         } else {
             // Updating
@@ -741,11 +1079,11 @@ async function submitMember() {
             const response = await fetch(`${API_BASE}/members/update`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(data)
+                body: JSON.stringify(withOperator(data))
             });
             if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(errorText);
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || '更新失败');
             }
         }
 
@@ -759,14 +1097,36 @@ async function submitMember() {
     }
 }
 
+/**
+ * 删除社员
+ * @param {number} id - 社员ID
+ */
 async function deleteMember(id) {
+    // 前端检测：超级管理员不能被删除
+    const member = _cachedMembers.find(m => m.id === id);
+    if (member && member.role === 'super_admin') {
+        alert('超级管理员不能被删除');
+        return;
+    }
+    
     if(!confirm('确定要移除该社员吗？此操作无法撤销。')) return;
-    await fetch(`${API_BASE}/members/delete`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({id: id})
-    });
-    fetchMembers();
+    try {
+        const res = await fetch(`${API_BASE}/members/delete`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(withOperator({id: id}))
+        });
+        if(res.ok) {
+            alert('社员已移除');
+            fetchMembers();
+        } else {
+            const error = await res.json().catch(() => ({}));
+            alert('删除失败: ' + (error.error || '权限不足'));
+        }
+    } catch(e) {
+        console.error('删除社员失败:', e);
+        alert('网络错误，请重试');
+    }
 }
 
 async function fetchFinance() {
@@ -803,8 +1163,20 @@ async function fetchFinance() {
     `).join('');
 }
 
+// ============================================================================
+// 事务与积分模块
+// ============================================================================
 let _cachedTasks = [];
+
+/**
+ * 获取任务列表并渲染
+ * 显示任务状态、领取/提交/审批按钮
+ * 根据用户角色控制操作权限
+ */
 async function fetchTasks() {
+    // 确保成员缓存已加载（用于显示发布者/领取者名称）
+    await ensureMembersCached();
+    
     // 动态更新标题
     const titleEl = document.getElementById('tasks-section-title');
     if(titleEl) {
@@ -854,9 +1226,16 @@ async function fetchTasks() {
                         <button onclick="submitTaskComplete(${t.id})" class="btn-submit">提交完成</button>
                         <button onclick="unclaimTask(${t.id})" class="btn-unclaim" style="margin-left:8px;">撤销领取</button>
                     `;
+                    // 管理员额外显示直接验收按钮
+                    if(isManager) {
+                        actionButtons += `<button onclick="forceApproveTask(${t.id})" class="btn-approve" style="margin-left:8px;">直接验收</button>`;
+                    }
                 } else if(isManager) {
-                    // 管理者：可撤销他人领取
-                    actionButtons = `<button onclick="unclaimTask(${t.id})" class="btn-unclaim">撤销领取</button>`;
+                    // 管理者：可撤销他人领取或直接验收
+                    actionButtons = `
+                        <button onclick="forceApproveTask(${t.id})" class="btn-approve">直接验收</button>
+                        <button onclick="unclaimTask(${t.id})" class="btn-unclaim" style="margin-left:8px;">撤销领取</button>
+                    `;
                 }
             } else if(t.status === 'submitted' && (isCreator || isManager)) {
                 // 待验收：发布者或管理员可审批
@@ -880,8 +1259,8 @@ async function fetchTasks() {
                     <p>${t.description || ''}</p>
                     <small>
                         奖励: <span class="task-reward">${t.reward}</span> ${pointsName}
-                        ${t.creator ? `&nbsp;|&nbsp;发布者: ${t.creator}` : ''}
-                        ${t.assignee ? `&nbsp;|&nbsp;领取者: ${t.assignee}` : ''}
+                        ${t.creator ? `&nbsp;|&nbsp;发布者: ${getSmartDisplayName(t.creator_id, t.creator)}` : ''}
+                        ${t.assignee ? `&nbsp;|&nbsp;领取者: ${getSmartDisplayName(t.assignee_id, t.assignee)}` : ''}
                     </small>
                 </div>
                 <div style="display:flex; align-items:center;">
@@ -907,12 +1286,28 @@ function getTaskStatusInfo(status) {
     return statusMap[status] || { label: status, className: '' };
 }
 
-function openTaskModal() {
+async function openTaskModal() {
     document.getElementById('task-modal-title').innerText = '发布事务';
     document.getElementById('t-title').value = '';
     document.getElementById('t-description').value = '';
     document.getElementById('t-reward').value = '';
     document.getElementById('t-reward').placeholder = `奖励${getPointsName()}`;
+    
+    // 加载社员列表到指派下拉框
+    const assigneeSelect = document.getElementById('t-assignee');
+    if(assigneeSelect) {
+        // 先尝试获取社员列表
+        if(_cachedMembers.length === 0) {
+            try {
+                const res = await fetch(`${API_BASE}/members`);
+                if(res.ok) _cachedMembers = await res.json();
+            } catch(e) { console.error(e); }
+        }
+        
+        assigneeSelect.innerHTML = '<option value="">不指派，等待领取</option>' +
+            _cachedMembers.map(m => `<option value="${m.name}">${m.alias || m.name}</option>`).join('');
+    }
+    
     toggleModal('modal-task');
 }
 
@@ -920,10 +1315,18 @@ async function submitTask() {
     const title = document.getElementById('t-title').value.trim();
     const description = document.getElementById('t-description').value.trim();
     const reward = parseInt(document.getElementById('t-reward').value) || 0;
+    const assignee = document.getElementById('t-assignee')?.value || '';
     
     if(!title) { alert('请填写事务标题'); return; }
     
     try {
+        // 获取assignee的ID（如果有指派）
+        let assigneeId = null;
+        if (assignee) {
+            const assigneeMember = _cachedMembers.find(m => m.name === assignee);
+            assigneeId = assigneeMember ? assigneeMember.id : null;
+        }
+        
         const res = await fetch(`${API_BASE}/tasks`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -931,14 +1334,21 @@ async function submitTask() {
                 title,
                 description,
                 reward,
-                creator: currentUser.name
+                creator: currentUser.alias || currentUser.name,
+                creator_id: currentUser.id,  // 存储创建者ID用于动态查找
+                assignee: assignee || null,
+                assignee_id: assigneeId  // 存储领取者ID用于动态查找
             })
         });
         
         if(res.ok) {
             toggleModal('modal-task');
             fetchTasks();
-            alert('事务发布成功！');
+            if(assignee) {
+                alert(`事务已派发给 ${assignee}！`);
+            } else {
+                alert('事务发布成功！');
+            }
         } else {
             alert('发布失败');
         }
@@ -955,7 +1365,7 @@ async function claimTask(taskId) {
         const res = await fetch(`${API_BASE}/tasks/claim`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ task_id: taskId, member_name: currentUser.name })
+            body: JSON.stringify({ task_id: taskId, member_name: currentUser.name, member_id: currentUser.id })
         });
         
         if(res.ok) {
@@ -1049,6 +1459,34 @@ async function approveTask(taskId) {
     }
 }
 
+async function forceApproveTask(taskId) {
+    if(!confirm(`确认直接验收此任务？\n此操作将跳过用户提交步骤，直接完成任务并发放${getPointsName()}奖励。`)) return;
+    
+    try {
+        const res = await fetch(`${API_BASE}/tasks/approve`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ task_id: taskId, force: true })
+        });
+        
+        if(res.ok) {
+            const data = await res.json();
+            fetchTasks();
+            if(data.gained > 0) {
+                alert(`验收完成！已发放 ${data.gained} ${getPointsName()}`);
+            } else {
+                alert('验收完成！');
+            }
+        } else {
+            alert('验收失败');
+            fetchTasks();
+        }
+    } catch(e) {
+        console.error(e);
+        alert('网络错误');
+    }
+}
+
 async function rejectTask(taskId) {
     if(!confirm('确认退回任务？任务将退回给领取者重做。')) return;
     
@@ -1118,11 +1556,20 @@ async function completeTask(taskId) {
     }
 }
 
-// --- Activities ---
+// ============================================================================
+// 活动管理模块
+// ============================================================================
 let _cachedActivities = [];
 let editingActivityId = null;
 
+/**
+ * 获取活动列表并渲染
+ * 显示活动状态、编辑/删除按钮
+ */
 async function fetchActivities() {
+    // 确保成员缓存已加载（用于活动详情中显示发布者名称）
+    await ensureMembersCached();
+    
     const container = document.getElementById('activity-list');
     showLoading('activity-list');
     
@@ -1209,10 +1656,11 @@ async function submitActivity() {
             date: document.getElementById('act-date').value,
             location: document.getElementById('act-location').value,
             status: document.getElementById('act-status').value,
-            publisher: currentUser ? currentUser.name : 'Unknown'
+            publisher: currentUser ? (currentUser.alias || currentUser.name) : 'Unknown',
+            publisher_id: currentUser ? currentUser.id : null  // 存储发布者ID用于动态查找
         };
 
-        if(!data.title) { alert('请输入活动主题'); throw new Error('Title required'); }
+        if(!data.title || !data.date) { alert('活动主题和时间为必填项'); throw new Error('Required fields missing'); }
 
         let url = `${API_BASE}/activities`;
         if(editingActivityId) {
@@ -1263,6 +1711,7 @@ async function submitPoem() {
             title: document.getElementById('p-title').value,
             // Automatically use current user alias or name
             author: (currentUser.alias && currentUser.alias.trim()) ? currentUser.alias : currentUser.name,
+            author_id: currentUser.id,  // 存储作者ID用于动态查找
             type: document.getElementById('p-type').value,
             content: document.getElementById('p-content').value,
             date: new Date().toISOString().split('T')[0]
@@ -1321,15 +1770,15 @@ async function submitFinance() {
             date: new Date().toISOString().split('T')[0]
         };
 
-        if (isNaN(data.amount) || !data.summary) {
-            alert('请填写完整财务流向');
+        if (isNaN(data.amount) || !data.summary || !data.handler) {
+            alert('金额、摘要和经办人为必填项');
             return;
         }
 
         const response = await fetch(`${API_BASE}/finance`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(data)
+            body: JSON.stringify(withOperator(data))
         });
 
         if (!response.ok) throw new Error(`Server Error: ${response.status}`);
@@ -1351,7 +1800,10 @@ async function submitFinance() {
 
 let _homeActivities = []; // Store for home usage
 
-function openActivityDetailView(id) {
+async function openActivityDetailView(id) {
+    // 确保成员缓存已加载（用于显示发布者名称）
+    await ensureMembersCached();
+    
     // Search in caches - prefer _cachedActivities (fresher if visited/edited) over _homeActivities
     let act = null;
     if(typeof _cachedActivities !== 'undefined' && _cachedActivities.length > 0) {
@@ -1379,7 +1831,7 @@ function openActivityDetailView(id) {
                 </div>
                 <div style="display:flex;">
                     <span style="color:#666; width:80px; flex-shrink:0;">发布人</span>
-                    <span>${act.publisher || '未知'}</span>
+                    <span>${getSmartDisplayName(act.publisher_id, act.publisher) || '未知'}</span>
                 </div>
             </div>
             <div style="white-space:pre-wrap; line-height:1.8; color:#333; font-size:1.05rem;">${(act.desc || '（暂无详情）').trim()}</div>
@@ -1415,12 +1867,14 @@ function editActivityFromView(id) {
 }
 
 async function deleteActivityInView(id) {
-    if(!confirm('确定删除此活动？')) return;
-    toggleModal('modal-activity-view'); // Close view
-    await deleteActivity(id); // Reuse existing delete
+    toggleModal('modal-activity-view'); // Close view first
+    await deleteActivity(id); // deleteActivity has its own confirm
 }
 
 async function loadSystemInfo() {
+    // 确保成员缓存已加载（用于首页显示诗作作者）
+    await ensureMembersCached();
+    
     try {
         const res = await fetch(`${API_BASE}/system/info`);
         const info = await res.json();
@@ -1461,6 +1915,62 @@ async function loadSystemInfo() {
             if(ramPercent > 90) ramBar.className = 'status-bar-fill danger';
             else if(ramPercent > 70) ramBar.className = 'status-bar-fill warning';
             else ramBar.className = 'status-bar-fill';
+            
+            // 系统时间显示
+            const sysTimeEl = document.getElementById('admin-system-time');
+            if(sysTimeEl && info.system_time) {
+                sysTimeEl.innerText = info.system_time;
+            }
+            
+            // CPU温度显示 (进度条风格)
+            const cpuTempTextEl = document.getElementById('admin-cpu-temp-text');
+            const cpuTempBarEl = document.getElementById('admin-cpu-temp-bar');
+            if(cpuTempTextEl && cpuTempBarEl) {
+                if(info.cpu_temp !== null && info.cpu_temp !== undefined) {
+                    const temp = info.cpu_temp;
+                    cpuTempTextEl.innerText = `${temp.toFixed(1)}°C`;
+                    // 温度范围: 0-100°C，映射为百分比
+                    const percent = Math.min(100, Math.max(0, temp));
+                    cpuTempBarEl.style.width = `${percent}%`;
+                    // 根据温度设置进度条颜色
+                    cpuTempBarEl.classList.remove('warm', 'hot');
+                    if(temp > 80) cpuTempBarEl.classList.add('hot');
+                    else if(temp > 60) cpuTempBarEl.classList.add('warm');
+                } else {
+                    cpuTempTextEl.innerText = '不支持';
+                    cpuTempBarEl.style.width = '0%';
+                }
+            }
+            
+            // WiFi信号强度显示 (进度条风格)
+            const wifiTextEl = document.getElementById('admin-wifi-signal-text');
+            const wifiBarEl = document.getElementById('admin-wifi-signal-bar');
+            if(wifiTextEl && wifiBarEl && info.wifi_rssi !== undefined) {
+                const rssi = info.wifi_rssi;
+                const ssid = info.wifi_ssid || 'Unknown';
+                let signalText = '';
+                
+                // 根据RSSI值判断信号质量
+                // RSSI范围通常 -100dBm(差) 到 -30dBm(极好)
+                // 映射为百分比: (-100 - rssi) / -70 * 100
+                const percent = Math.min(100, Math.max(0, (rssi + 100) / 70 * 100));
+                
+                wifiBarEl.classList.remove('weak', 'poor');
+                if(rssi >= -50) {
+                    signalText = '极好';
+                } else if(rssi >= -60) {
+                    signalText = '良好';
+                } else if(rssi >= -70) {
+                    signalText = '一般';
+                    wifiBarEl.classList.add('weak');
+                } else {
+                    signalText = '较弱';
+                    wifiBarEl.classList.add('poor');
+                }
+                
+                wifiTextEl.innerText = `${ssid} (${rssi}dBm ${signalText})`;
+                wifiBarEl.style.width = `${percent}%`;
+            }
         }
             
         // Load Daily Recommendation (Random)
@@ -1471,10 +1981,10 @@ async function loadSystemInfo() {
             document.getElementById('daily-poem').innerHTML = `
                 <h4>${p.title}</h4>
                 <p style="white-space: pre-wrap;">${p.content}</p>
-                <small>—— ${p.author}</small>
+                <small>—— ${getSmartDisplayName(p.author_id, p.author)}</small>
             `;
         } else {
-            document.getElementById('daily-poem').innerText = "暂无诗词，快去藏诗阁发布吧！";
+            document.getElementById('daily-poem').innerHTML = '<div class="empty-hint">暂无诗词，快去藏诗阁发布吧！</div>';
         }
 
         // Load Home Activities (Recent 3 unfinished)
@@ -1492,7 +2002,7 @@ async function loadSystemInfo() {
                     .slice(0, 3);
                 
                 if(upcoming.length === 0) {
-                    homeActList.innerHTML = '<p style="color:#666;">暂无近期活动</p>';
+                    homeActList.innerHTML = '<div class="empty-hint">暂无近期活动</div>';
                 } else {
                     homeActList.innerHTML = upcoming.map(a => `
                         <div onclick="openActivityDetailView(${a.id})" style="border-bottom: 1px solid #eee; padding: 12px 0; display:flex; justify-content:space-between; align-items:center; cursor:pointer;" class="clickable-item">
@@ -1526,6 +2036,9 @@ async function loadSystemInfo() {
 
 // --- 最新诗作 ---
 async function loadLatestPoems() {
+    // 确保成员缓存已加载（用于显示作者名称）
+    await ensureMembersCached();
+    
     const container = document.getElementById('latest-poems-list');
     if(!container) return;
     
@@ -1534,7 +2047,7 @@ async function loadLatestPoems() {
         const poems = await res.json();
         
         if(poems.length === 0) {
-            container.innerHTML = '<p style="color:#666; text-align:center;">暂无诗作</p>';
+            container.innerHTML = '<div class="empty-hint">暂无诗作</div>';
             return;
         }
         
@@ -1544,7 +2057,7 @@ async function loadLatestPoems() {
                     <strong style="font-size:1em;">${p.title}</strong>
                     <span style="${getPoemTypeStyle(p.type)} padding:2px 6px; border-radius:4px; font-size:0.75em;">${p.type}</span>
                 </div>
-                <div style="font-size:0.85em; color:#888; margin-top:4px;">${p.author}</div>
+                <div style="font-size:0.85em; color:#888; margin-top:4px;">${getSmartDisplayName(p.author_id, p.author)}</div>
             </div>
         `).join('');
     } catch(e) {
@@ -1569,7 +2082,7 @@ async function loadPointsRanking() {
         const ranking = await res.json();
         
         if(ranking.length === 0) {
-            container.innerHTML = '<p style="color:#666; text-align:center;">暂无年度数据</p>';
+            container.innerHTML = '<div class="empty-hint">暂无年度数据</div>';
             return;
         }
         
@@ -1616,6 +2129,9 @@ function openActivityFromSearch(id) {
 
 // This is called when user types in global search input
 async function handleGlobalSearch(term) {
+    // 确保成员缓存已加载（用于搜索结果显示作者名称）
+    await ensureMembersCached();
+    
     if (!term) {
         clearGlobalSearch();
         return;
@@ -1665,7 +2181,7 @@ async function handleGlobalSearch(term) {
             html += `<h4>藏诗阁 (${poems.length})</h4>`;
             html += poems.map(p => `
                 <div class="card" onclick="openPoemFromSearch(${p.id})" style="cursor:pointer; margin-bottom:10px;">
-                    <b>[作品] ${highlight(p.title)}</b> - ${highlight(p.author)}
+                    <b>[作品] ${highlight(p.title)}</b> - ${highlight(getSmartDisplayName(p.author_id, p.author))}
                     <br><small style="color:#666; font-size:0.8em;">${highlight(p.content ? p.content.substring(0, 30) : '')}...</small>
                 </div>`).join('');
         }
@@ -1769,13 +2285,14 @@ async function saveSystemName() {
         const res = await fetch(`${API_BASE}/settings/system`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ system_name: value })
+            body: JSON.stringify(withOperator({ system_name: value }))
         });
         if(res.ok) {
             _systemSettings.system_name = value;
             alert('系统名称已更新');
         } else {
-            alert('保存失败');
+            const err = await res.json().catch(() => ({}));
+            alert('保存失败: ' + (err.error || '权限不足'));
         }
     } catch(e) { console.error(e); alert('网络错误'); }
 }
@@ -1789,7 +2306,7 @@ async function savePointsName() {
         const res = await fetch(`${API_BASE}/settings/system`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ points_name: value })
+            body: JSON.stringify(withOperator({ points_name: value }))
         });
         if(res.ok) {
             _systemSettings.points_name = value;
@@ -1799,7 +2316,8 @@ async function savePointsName() {
                 location.reload();
             }
         } else {
-            alert('保存失败');
+            const err = await res.json().catch(() => ({}));
+            alert('保存失败: ' + (err.error || '权限不足'));
         }
     } catch(e) {
         console.error(e);
@@ -1818,13 +2336,14 @@ async function savePasswordSalt() {
         const res = await fetch(`${API_BASE}/settings/system`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ password_salt: value })
+            body: JSON.stringify(withOperator({ password_salt: value }))
         });
         if(res.ok) {
             _systemSettings.password_salt = value;
             alert('Salt已更新，请立即执行密码迁移！');
         } else {
-            alert('保存失败');
+            const err = await res.json().catch(() => ({}));
+            alert('保存失败: ' + (err.error || '权限不足'));
         }
     } catch(e) {
         console.error(e);
@@ -1866,14 +2385,15 @@ async function saveCustomFields(fields) {
          const res = await fetch(`${API_BASE}/settings/fields`, {
              method: 'POST',
              headers: {'Content-Type': 'application/json'},
-             body: JSON.stringify(fields)
+             body: JSON.stringify(withOperator({fields: fields}))
          });
          if(res.ok) {
              _customFields = fields;
              renderAdminSettings(); 
              alert('设置已保存');
          } else {
-             alert('保存失败');
+             const err = await res.json().catch(() => ({}));
+             alert('保存失败: ' + (err.error || '权限不足'));
          }
      } catch(e) { console.error(e); alert('网络错误'); }
 }
@@ -1891,22 +2411,25 @@ function renderAdminSettings() {
     // 加载WiFi配置
     loadWifiConfig();
     
+    // 加载登录日志（必须在 return 之前调用）
+    fetchLoginLogs();
+    
     if(_customFields.length === 0) {
-        container.innerHTML = '<small>暂无自定义字段</small>';
+        container.innerHTML = '<div class="empty-hint">暂无自定义字段</div>';
         return;
     }
 
-    const typeMap = { text: '文本', number: '数字', date: '日期', email: '邮箱' };
+    const typeMap = { text: '文本', number: '数字', date: '日期', textarea: '多行文本' };
 
     container.innerHTML = _customFields.map(f => `
-        <div class="field-item">
-            <span><strong>${f.label}</strong> <small style="color:#888; font-weight:normal">(${typeMap[f.type] || '文本'})</small></span>
-            <button onclick="deleteCustomField('${f.id}')" class="delete-btn">删除</button>
+        <div class="custom-field-item">
+            <div class="custom-field-info">
+                <span class="custom-field-name">${f.label}</span>
+                <span class="custom-field-type">${typeMap[f.type] || '文本'}</span>
+            </div>
+            <button onclick="deleteCustomField('${f.id}')" class="custom-field-delete">删除</button>
         </div>
     `).join('');
-    
-    // 加载登录日志
-    fetchLoginLogs();
 }
 
 // --- 数据统计 ---
@@ -1937,7 +2460,7 @@ async function fetchLoginLogs() {
         const logs = await res.json();
         
         if(logs.length === 0) {
-            container.innerHTML = '<p style="color:#999; text-align:center;">暂无登录记录</p>';
+            container.innerHTML = '<div class="empty-hint">暂无登录记录</div>';
             return;
         }
         
@@ -1966,14 +2489,16 @@ async function migratePasswords() {
     try {
         const res = await fetch(`${API_BASE}/migrate_passwords`, {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'}
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({operator_id: getOperatorId()})
         });
         
         if(res.ok) {
             const result = await res.json();
             alert(`密码迁移完成！共迁移 ${result.migrated} 个账户。`);
         } else {
-            alert('迁移失败');
+            const err = await res.json().catch(() => ({}));
+            alert('迁移失败: ' + (err.error || '权限不足'));
         }
     } catch(e) {
         console.error(e);
@@ -2065,14 +2590,14 @@ async function saveWifiConfig() {
         const res = await fetch(`${API_BASE}/wifi/config`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(config)
+            body: JSON.stringify(withOperator(config))
         });
         
         if(res.ok) {
             alert('WiFi配置已保存，重启设备后生效');
         } else {
             const err = await res.json();
-            alert('保存失败: ' + (err.error || '未知错误'));
+            alert('保存失败: ' + (err.error || '权限不足'));
         }
     } catch(e) {
         console.error(e);
@@ -2082,10 +2607,18 @@ async function saveWifiConfig() {
 
 // --- 数据备份 ---
 async function exportBackup() {
+    // 检查操作者身份
+    const operatorId = getOperatorId();
+    if(!operatorId) {
+        alert('操作失败：无法获取操作者身份，请重新登录后再试');
+        return;
+    }
+    
     try {
-        const res = await fetch(`${API_BASE}/backup/export`);
+        const res = await fetch(`${API_BASE}/backup/export?operator_id=${operatorId}`);
         if(!res.ok) {
-            throw new Error('导出请求失败');
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || '导出请求失败');
         }
         const backup = await res.json();
         
@@ -2122,6 +2655,14 @@ async function importBackup(event) {
     const file = event.target.files[0];
     if(!file) return;
     
+    // 检查操作者身份
+    const operatorId = getOperatorId();
+    if(!operatorId) {
+        alert('操作失败：无法获取操作者身份，请重新登录后再试');
+        document.getElementById('backup-file-input').value = '';
+        return;
+    }
+    
     if(!confirm('导入数据将覆盖现有所有数据，此操作不可逆！\n\n确定要继续吗？')) {
         document.getElementById('backup-file-input').value = '';
         return;
@@ -2140,7 +2681,8 @@ async function importBackup(event) {
             throw new Error('备份文件结构不完整');
         }
         
-        const res = await fetch(`${API_BASE}/backup/import`, {
+        // 通过URL参数传递操作者身份（避免大JSON解析问题）
+        const res = await fetch(`${API_BASE}/backup/import?operator_id=${operatorId}`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(backup)
@@ -2151,7 +2693,7 @@ async function importBackup(event) {
             location.reload();
         } else {
             const err = await res.json();
-            throw new Error(err.error || '未知错误');
+            throw new Error(err.error || '权限不足');
         }
     } catch(e) {
         console.error(e);

@@ -79,6 +79,81 @@ body {
     font-size: 0.9em;
 }
 
+.nav-user-link {
+    color: var(--accent) !important;
+    font-weight: 600;
+    padding: 6px 12px;
+    margin-left: 10px;
+    background: rgba(0, 128, 128, 0.1);
+    border-radius: 16px;
+    font-size: 0.9em;
+    transition: all 0.2s;
+}
+
+.nav-user-link:hover {
+    background: rgba(0, 128, 128, 0.2);
+    transform: scale(1.02);
+}
+
+/* IP Mode Selector */
+.ip-mode-selector {
+    display: flex;
+    gap: 12px;
+}
+
+.ip-mode-option {
+    flex: 1;
+    display: block;
+    cursor: pointer;
+}
+
+.ip-mode-option input[type="radio"] {
+    display: none;
+}
+
+.ip-mode-label {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 16px;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    background: #fff;
+    transition: all 0.2s;
+}
+
+.ip-mode-option input[type="radio"]:checked + .ip-mode-label {
+    border-color: var(--accent);
+    background: rgba(0, 128, 128, 0.05);
+}
+
+.ip-mode-title {
+    font-size: 0.95em;
+    font-weight: 600;
+    color: #333;
+}
+
+.ip-mode-desc {
+    font-size: 0.75em;
+    color: #888;
+    margin-top: 2px;
+}
+
+.ip-mode-option input[type="radio"]:checked + .ip-mode-label .ip-mode-title {
+    color: var(--accent);
+}
+
+/* WiFi Form Grid */
+.wifi-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+}
+
+.wifi-ap-ip-input {
+    width: 50%;
+}
+
 /* Main Layout */
 main { 
     margin-top: 60px; /* Increased top margin for better spacing */
@@ -240,6 +315,34 @@ button:active { transform: translateY(0); }
     background: linear-gradient(90deg, #e74c3c, #c0392b);
 }
 
+.status-bar-temp {
+    background: linear-gradient(90deg, #3498db, #2980b9);
+}
+
+.status-bar-temp.warm {
+    background: linear-gradient(90deg, #f39c12, #e67e22);
+}
+
+.status-bar-temp.hot {
+    background: linear-gradient(90deg, #e74c3c, #c0392b);
+}
+
+.status-bar-wifi {
+    background: linear-gradient(90deg, var(--accent), #00a0a0);
+}
+
+.status-bar-wifi.weak {
+    background: linear-gradient(90deg, #f39c12, #e67e22);
+}
+
+.status-bar-wifi.poor {
+    background: linear-gradient(90deg, #e74c3c, #c0392b);
+}
+
+.status-time {
+    font-size: 0.85em;
+}
+
 /* Data Statistics Grid */
 .stats-grid {
     display: grid;
@@ -288,6 +391,75 @@ button:active { transform: translateY(0); }
     letter-spacing: 0.5px;
 }
 
+/* Role Permissions Grid */
+.role-permissions-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 15px;
+}
+
+.role-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: #fff;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.role-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.role-header {
+    padding: 12px 15px;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.role-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+.role-perms {
+    list-style: none;
+    padding: 12px 15px;
+    margin: 0;
+}
+
+.role-perms li {
+    padding: 6px 0;
+    font-size: 0.85rem;
+    color: #555;
+    border-bottom: 1px dashed #eee;
+    display: flex;
+    align-items: center;
+}
+
+.role-perms li:last-child {
+    border-bottom: none;
+}
+
+.role-perms li::before {
+    content: "✓";
+    color: #27ae60;
+    font-weight: bold;
+    margin-right: 8px;
+    font-size: 0.8rem;
+}
+
+.role-perms li.perm-deny {
+    color: #999;
+}
+
+.role-perms li.perm-deny::before {
+    content: "✗";
+    color: #e74c3c;
+}
+
 /* Lists & Tables */
 .header-row { 
     display: flex; 
@@ -315,23 +487,94 @@ button:active { transform: translateY(0); }
 .member-card { 
     text-align: center; 
     border: 1px solid var(--border); 
-    padding: 20px; 
+    padding: 20px 16px; 
     border-radius: var(--radius); 
     background: white; 
-    transition: box-shadow 0.2s;
+    transition: all 0.2s ease;
+    position: relative;
 }
-.member-card:hover { box-shadow: var(--shadow); }
-.member-avatar { font-size: 2.5rem; margin-bottom: 10px; display: block; }
-.member-role { font-size: 0.85rem; color: var(--text-muted); display: block; margin-top: 5px; }
-.points-badge { 
-    background: #e1f5fe; 
-    color: #0288d1; 
-    padding: 4px 10px; 
-    border-radius: 20px; 
+.member-card:hover { 
+    box-shadow: 0 6px 20px rgba(0,0,0,0.08);
+    transform: translateY(-2px);
+}
+.member-avatar { 
+    width: 56px;
+    height: 56px;
+    background: linear-gradient(135deg, var(--accent), #006666);
+    border-radius: 50%;
+    margin: 0 auto 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    color: white;
+    box-shadow: 0 3px 8px rgba(0,128,128,0.25);
+}
+.member-card h4 {
+    margin: 0 0 4px 0;
+    font-size: 1rem;
+    color: var(--primary);
+}
+.member-role { 
     font-size: 0.8rem; 
+    color: var(--text-muted); 
+    display: block; 
+    margin-top: 2px;
+    line-height: 1.4;
+}
+.member-role small {
+    display: inline-block;
+    background: #f0f4f8;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    margin-top: 4px;
+}
+.points-badge { 
+    background: linear-gradient(135deg, #e8f5f5, #d0eeee);
+    color: var(--accent); 
+    padding: 5px 12px; 
+    border-radius: 20px; 
+    font-size: 0.75rem; 
     font-weight: 600;
     display: inline-block;
-    margin-top: 8px;
+}
+.member-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #f0f0f0;
+}
+.member-actions .btn-edit {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: 5px 14px;
+    font-size: 0.75rem;
+    border-radius: 15px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.member-actions .btn-edit:hover {
+    background: var(--accent);
+    color: white;
+}
+.member-actions .btn-remove {
+    background: transparent;
+    color: #999;
+    border: 1px solid #ddd;
+    padding: 5px 14px;
+    font-size: 0.75rem;
+    border-radius: 15px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.member-actions .btn-remove:hover {
+    background: #e74c3c;
+    color: white;
+    border-color: #e74c3c;
 }
 .delete-btn {
     background: transparent;
@@ -399,28 +642,53 @@ button:active { transform: translateY(0); }
     animation: slideUp 0.3s;
 }
 
+.modal-content h3 {
+    margin-top: 0;
+    padding-right: 40px;
+}
+
 .close {
     position: absolute;
-    top: 15px;
-    right: 15px;
-    width: 32px;
-    height: 32px;
+    top: 28px;
+    right: 25px;
+    width: 28px;
+    height: 28px;
     background: #f1f3f5;
-    color: #636e72;
     border-radius: 50%;
-    text-align: center;
-    line-height: 32px;
-    font-size: 20px;
     cursor: pointer;
     transition: all 0.2s ease;
-    display: flex; /* Centering fix */
-    align-items: center;
-    justify-content: center;
 }
+
+/* 使用CSS伪元素绘制×，避免字符基线问题 */
+.close::before,
+.close::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 14px;
+    height: 2px;
+    background: #636e72;
+    border-radius: 1px;
+    transition: background 0.2s ease;
+}
+
+.close::before {
+    transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.close::after {
+    transform: translate(-50%, -50%) rotate(-45deg);
+}
+
 .close:hover {
     background: #e74c3c;
-    color: white;
     transform: rotate(90deg);
+}
+
+.close:hover::before,
+.close:hover::after {
+    background: white;
 }
 
 @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
@@ -585,17 +853,28 @@ button:active { transform: translateY(0); }
     }
     
     /* 移动端用户雅号样式 - 与菜单项统一 */
-    .nav-user {
+    .nav-user,
+    .nav-user-link {
         display: block;
-        margin: 0;
-        margin-bottom: 5px;
-        padding: 12px 16px;
-        background: #f8f9fa;
-        border-radius: 8px;
+        margin: 0 !important;
+        margin-bottom: 5px !important;
+        padding: 12px 16px !important;
+        background: rgba(0, 128, 128, 0.1) !important;
+        border-radius: 8px !important;
         text-align: center;
         font-size: 1rem;
-        color: var(--primary);
-        font-weight: 500;
+        color: var(--accent) !important;
+        font-weight: 600;
+    }
+
+    /* WiFi设置移动端 - 表单单列布局 */
+    .wifi-form-grid {
+        grid-template-columns: 1fr !important;
+        gap: 10px !important;
+    }
+    
+    .wifi-ap-ip-input {
+        width: 100% !important;
     }
 
     .main-app {
@@ -707,6 +986,21 @@ button:active { transform: translateY(0); }
         font-size: 1.1rem;
     }
     
+    .role-permissions-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+    }
+    .role-header {
+        padding: 10px 12px;
+    }
+    .role-perms {
+        padding: 10px 12px;
+    }
+    .role-perms li {
+        font-size: 0.8rem;
+        padding: 5px 0;
+    }
+    
     .admin-field-row {
         flex-wrap: wrap;
     }
@@ -764,6 +1058,13 @@ button:active { transform: translateY(0); }
     color: var(--text-muted);
 }
 
+/* 简约空状态提示（用于小栏目） */
+.empty-hint {
+    text-align: center;
+    padding: 20px;
+    color: #999;
+}
+
 .empty-state-icon {
     font-size: 3rem;
     margin-bottom: 15px;
@@ -787,6 +1088,26 @@ button:active { transform: translateY(0); }
 
 .empty-state-btn:hover {
     opacity: 0.9;
+}
+
+/* 加载更多按钮 */
+.load-more-btn {
+    display: block;
+    width: 100%;
+    padding: 12px;
+    margin: 15px 0 30px;
+    background: #f5f5f5;
+    border: 1px solid #ddd;
+    color: #666;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.95rem;
+    transition: all 0.2s ease;
+}
+
+.load-more-btn:hover {
+    background: #eee;
+    border-color: #ccc;
 }
 
 /* --- 任务状态标签 --- */
@@ -916,4 +1237,148 @@ button:active { transform: translateY(0); }
 .field-item button {
     padding: 4px 10px;
     font-size: 0.8rem;
+}
+
+/* --- 扁平化统计图标 --- */
+.flat-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+.flat-icon::before {
+    color: white;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+/* 社员图标 - 双人 */
+.icon-members::before {
+    content: "■■";
+    font-size: 10px;
+    letter-spacing: 2px;
+}
+
+/* 诗作图标 - 文档 */
+.icon-poems::before {
+    content: "≡";
+    font-size: 18px;
+}
+
+/* 活动图标 - 日历 */
+.icon-activities::before {
+    content: "▦";
+    font-size: 16px;
+}
+
+/* 事务图标 - 勾选 */
+.icon-tasks::before {
+    content: "✓";
+    font-size: 16px;
+    font-weight: bold;
+}
+
+/* 财务图标 - 货币 */
+.icon-finance::before {
+    content: "¥";
+    font-size: 16px;
+    font-weight: bold;
+}
+
+/* 日期字段精简标签 */
+.date-label {
+    display: block;
+    font-size: 0.8em;
+    color: #666;
+    margin: 8px 0 4px 2px;
+}
+
+/* 自定义字段管理样式 */
+.custom-fields-list {
+    margin-bottom: 15px;
+}
+
+.custom-field-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    margin-bottom: 8px;
+}
+
+.custom-field-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.custom-field-name {
+    font-weight: 500;
+    color: #333;
+}
+
+.custom-field-type {
+    font-size: 0.75em;
+    color: #fff;
+    background: var(--accent);
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+
+.custom-field-delete {
+    padding: 4px 10px;
+    font-size: 0.8em;
+    background: transparent;
+    color: #999;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.custom-field-delete:hover {
+    background: #e74c3c;
+    color: #fff;
+    border-color: #e74c3c;
+}
+
+.custom-field-add {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding-top: 12px;
+    border-top: 1px solid #eee;
+}
+
+.custom-field-add input,
+.custom-field-add select,
+.custom-field-add button {
+    margin: 0;
+    padding: 0 12px;
+    height: 42px;
+    box-sizing: border-box;
+    line-height: 42px;
+}
+
+.custom-field-add input {
+    flex: 1;
+    min-width: 0;
+}
+
+.custom-field-add select {
+    width: 100px;
+    flex-shrink: 0;
+}
+
+.custom-field-add button {
+    flex-shrink: 0;
+    padding: 0 18px;
 }

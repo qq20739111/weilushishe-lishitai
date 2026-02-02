@@ -39,8 +39,29 @@ class Request:
 
         if 'content-length' in self.headers:
             length = int(self.headers['content-length'])
-            self.body = await self.reader.read(length)
-            if self.headers.get('content-type') == 'application/json':
+            # 分块读取大请求体，避免一次性分配大内存
+            if length > 8192:  # 大于8KB时分块读取
+                import gc
+                gc.collect()  # 读取前先释放内存
+                chunks = []
+                remaining = length
+                chunk_size = 4096
+                while remaining > 0:
+                    to_read = min(chunk_size, remaining)
+                    chunk = await self.reader.read(to_read)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    remaining -= len(chunk)
+                self.body = b''.join(chunks)
+                chunks = None  # 释放临时列表
+                gc.collect()
+            else:
+                self.body = await self.reader.read(length)
+            # 使用 startswith 匹配，支持 application/json; charset=utf-8 等变体
+            # 大请求体跳过自动JSON解析，由业务层处理
+            content_type = self.headers.get('content-type', '')
+            if content_type.startswith('application/json') and length <= 16384:
                 import json
                 try:
                     self.json = json.loads(self.body)
