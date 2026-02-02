@@ -1,3 +1,0 @@
-{"password": "344e978b81ad80c0c3cdf04e687e9e70553cc12d088c6b562613ab73fbe5d6ba", "alias": "root", "joined_at": "2024-01-01", "role": "super_admin", "name": "超级管理员", "points": 100, "id": 1, "phone": "13800002018", "custom": {}}
-{"custom": {}, "points": 0, "alias": "永生", "joined_at": "2026-02-01", "role": "admin", "name": "郑永生", "id": 2, "birthday": "1986-09-30", "phone": "15215133855", "password": "63baf533419fcdcbc66eba3aa6236407a4e2ee93c457974c6540ff187a788d2a", "operator_id": 1}
-{"id": 3, "points": 0, "alias": "溪云", "joined_at": "2026-02-01", "role": "member", "name": "雷磊", "operator_id": 2, "birthday": "1987-10-03", "phone": "13983198773", "password": "c8e2b37fdea410fce035989ba79ad5661900964567a6fd67706c67080127e1c3", "custom": {}}
