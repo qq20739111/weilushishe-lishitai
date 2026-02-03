@@ -52,11 +52,12 @@ def api_route(url, methods=['GET']):
     """
     API路由装饰器，包装原生route装饰器
     在API请求处理完成后自动触发LED快闪和看门狗喂狗
+    支持路径参数（如 /api/backup/table/<table>）
     """
     def decorator(f):
-        def wrapper(request):
+        def wrapper(request, *args, **kwargs):
             watchdog.feed()  # 每次API请求时喂狗
-            result = f(request)
+            result = f(request, *args, **kwargs)
             status_led.flash_once()  # API响应后LED快闪
             return result
         # 注册到microdot路由
@@ -91,6 +92,101 @@ def verify_password(password, hashed):
         return hash_password(password) == hashed
     # 否则为旧版明文密码，直接比较
     return password == hashed
+
+# ============================================================================
+# Token 鉴权机制
+# ============================================================================
+# Token格式: user_id:expire_timestamp:signature
+# signature = sha256(user_id:expire_timestamp:secret_key)[:32]
+# 默认过期时间: 30天
+
+DEFAULT_TOKEN_EXPIRE_DAYS = 30  # 默认30天
+
+def _get_token_expire_seconds():
+    """获取Token有效期秒数（从系统设置读取）"""
+    settings = get_settings()
+    days = settings.get('token_expire_days', DEFAULT_TOKEN_EXPIRE_DAYS)
+    return int(days) * 24 * 3600
+
+def _get_token_secret():
+    """获取Token签名密钥（使用password_salt作为基础）"""
+    settings = get_settings()
+    return settings.get('password_salt', 'weilu2018') + '_token_key'
+
+def generate_token(user_id):
+    """
+    生成登录Token
+    返回: (token字符串, 有效期秒数)
+    注: 返回有效期秒数而非时间戳，避免不同硬件时间纪元差异问题
+    """
+    expire_seconds = _get_token_expire_seconds()
+    # 使用设备内部时间计算过期时间（用于Token签名和后端验证）
+    expire_time = int(time.time()) + expire_seconds
+    secret = _get_token_secret()
+    # 生成签名
+    sign_data = f"{user_id}:{expire_time}:{secret}"
+    h = uhashlib.sha256(sign_data.encode('utf-8'))
+    signature = ubinascii.hexlify(h.digest()).decode('utf-8')[:32]
+    # 组装Token
+    token = f"{user_id}:{expire_time}:{signature}"
+    # 返回token和有效期秒数（前端用自己的时间计算过期时间点）
+    return token, expire_seconds
+
+def verify_token(token):
+    """
+    验证Token有效性
+    返回: (是否有效, user_id或None, 错误消息)
+    """
+    if not token:
+        return False, None, "未提供Token"
+    
+    try:
+        parts = token.split(':')
+        if len(parts) != 3:
+            return False, None, "Token格式错误"
+        
+        user_id = int(parts[0])
+        expire_time = int(parts[1])
+        provided_signature = parts[2]
+        
+        # 检查是否过期
+        current_time = int(time.time())
+        if current_time > expire_time:
+            return False, None, "Token已过期，请重新登录"
+        
+        # 验证签名
+        secret = _get_token_secret()
+        sign_data = f"{user_id}:{expire_time}:{secret}"
+        h = uhashlib.sha256(sign_data.encode('utf-8'))
+        expected_signature = ubinascii.hexlify(h.digest()).decode('utf-8')[:32]
+        
+        if provided_signature != expected_signature:
+            return False, None, "Token签名无效"
+        
+        return True, user_id, None
+    except Exception as e:
+        debug(f"Token验证失败: {e}", "Auth")
+        return False, None, "Token解析失败"
+
+def check_token(request):
+    """
+    从请求中验证Token（支持Header和参数两种方式）
+    返回: (是否有效, user_id或None, 错误响应或None)
+    """
+    # 优先从Header获取
+    token = request.headers.get('authorization', '').replace('Bearer ', '')
+    # 其次从URL参数获取
+    if not token:
+        token = request.args.get('token', '')
+    # POST请求也尝试从body获取
+    if not token and request.json:
+        token = request.json.get('token', '')
+    
+    valid, user_id, err_msg = verify_token(token)
+    if not valid:
+        return False, None, Response(json.dumps({"error": err_msg}), 401, {'Content-Type': 'application/json'})
+    
+    return True, user_id, None
 
 def simple_unquote(s):
     """Robust unquote for UTF-8 inputs"""
@@ -227,37 +323,59 @@ class JsonlDB:
             
         else:
             # --- Slow Path: Search (Scan Full File) ---
-            # Debug log removed to reduce serial clutter
-            results = []
+            # 内存优化：先扫描记录匹配行的偏移量，最后只解析需要的分页范围
+            matched_offsets = []
             try:
                 with open(self.filepath, 'r') as f:
-                    for line in f:
+                    while True:
+                        pos = f.tell()
+                        line = f.readline()
+                        if not line: break
                         if not line.strip(): continue
+                        
+                        # 快速检查：先在原始行中搜索（不解析JSON）
+                        if search_lower not in line.lower():
+                            continue
+                        
+                        # 确认匹配：解析JSON后精确匹配字段值
                         try:
                             obj = json.loads(line)
-                            
                             found = False
-                            # Search all values
                             for k, v in obj.items():
-                                # Optional: Limit search fields if needed
-                                val_str = str(v).lower()
-                                if search_lower in val_str:
+                                if search_lower in str(v).lower():
                                     found = True
                                     break
-                            
                             if found:
-                                results.append(obj)
-                        except Exception as e:
-                            debug(f"搜索解析记录失败: {e}", "DB")
+                                matched_offsets.append(pos)
+                        except:
+                            pass
             except Exception as e:
                 debug(f"搜索文件读取失败: {e}", "DB")
             
+            total = len(matched_offsets)
             if reverse:
-                results.reverse()
-                
-            total = len(results)
+                matched_offsets.reverse()
+            
+            # 只读取当前页需要的记录
             start_idx = (page - 1) * limit
-            return results[start_idx : start_idx + limit], total
+            end_idx = start_idx + limit
+            target_offsets = matched_offsets[start_idx:end_idx]
+            
+            results = []
+            if target_offsets:
+                try:
+                    with open(self.filepath, 'r') as f:
+                        for off in target_offsets:
+                            f.seek(off)
+                            line = f.readline()
+                            try:
+                                results.append(json.loads(line))
+                            except:
+                                pass
+                except Exception as e:
+                    debug(f"读取搜索结果失败: {e}", "DB")
+            
+            return results, total
 
     def update(self, id_val, update_func):
         """
@@ -334,6 +452,35 @@ class JsonlDB:
                         debug(f"get_all解析记录失败: {e}", "DB")
         return res
 
+    def iter_records(self):
+        """流式迭代器：逐行读取记录，内存友好（用于聚合计算）"""
+        if not file_exists(self.filepath):
+            return
+        try:
+            with open(self.filepath, 'r') as f:
+                for line in f:
+                    if line.strip():
+                        try:
+                            yield json.loads(line)
+                        except:
+                            pass
+        except Exception as e:
+            debug(f"iter_records失败: {e}", "DB")
+
+    def count(self):
+        """统计记录数量（只计数，不解析JSON，内存友好）"""
+        if not file_exists(self.filepath):
+            return 0
+        count = 0
+        try:
+            with open(self.filepath, 'r') as f:
+                for line in f:
+                    if line.strip():
+                        count += 1
+        except Exception as e:
+            debug(f"统计记录数失败: {e}", "DB")
+        return count
+
 
 # Initialize DBs
 db_poems = JsonlDB('data/poems.jsonl')
@@ -387,49 +534,140 @@ def can_assign_role(operator_role, target_role):
     
     return True, None
 
+def can_manage_member(operator_role, target_member_role):
+    """
+    检查操作者是否可以管理（编辑/删除）目标成员
+    返回: (allowed: bool, error_message: str|None)
+    规则：不能管理权限比自己高或相同的用户（超管除外）
+    """
+    operator_level = ROLE_LEVEL.get(operator_role, 3)
+    target_level = ROLE_LEVEL.get(target_member_role, 3)
+    
+    # 超级管理员可以管理所有用户
+    if operator_role == 'super_admin':
+        return True, None
+    
+    # 不能管理权限比自己高或相同的用户
+    if target_level <= operator_level:
+        return False, '无权管理此用户'
+    
+    return True, None
+
 def get_operator_role(request):
     """
-    从请求中获取操作者角色
-    请求体中需包含 operator_id 字段
-    返回: (operator_id, role) 或 (None, None)
+    从请求中获取操作者角色（通过Token验证）
+    返回: (user_id, role) 或 (None, None)
     """
     try:
         data = request.json if request.json else {}
-        operator_id = data.get('operator_id')
-        if not operator_id:
+        
+        # 从Header、URL参数或请求体获取Token
+        token = request.headers.get('authorization', '').replace('Bearer ', '')
+        if not token:
+            token = request.args.get('token', '') or data.get('token', '')
+        
+        if not token:
             return None, None
         
-        # 确保 operator_id 是整数类型（前端可能传递字符串）
-        try:
-            operator_id = int(operator_id)
-        except (ValueError, TypeError):
-            return None, None
-        
-        # 从数据库查询用户角色
-        with open(db_members.filepath, 'r') as f:
-            for line in f:
-                try:
-                    m = json.loads(line)
-                    if m.get('id') == operator_id:
-                        return operator_id, m.get('role', 'member')
-                except:
-                    pass
+        valid, user_id, err_msg = verify_token(token)
+        if valid and user_id:
+            # Token有效，查询用户角色
+            with open(db_members.filepath, 'r') as f:
+                for line in f:
+                    try:
+                        m = json.loads(line)
+                        if m.get('id') == user_id:
+                            return user_id, m.get('role', 'member')
+                    except:
+                        pass
     except Exception as e:
         debug(f"获取操作者角色失败: {e}", "Auth")
     return None, None
 
+# ============================================================================
+# 鉴权装饰器 - 简化API权限验证
+# ============================================================================
+
+def require_login(f):
+    """
+    装饰器：需要登录
+    用法：@require_login
+    """
+    def wrapper(request, *args, **kwargs):
+        data = request.json if request.json else {}
+        token = request.headers.get('authorization', '').replace('Bearer ', '')
+        if not token:
+            token = request.args.get('token', '') or data.get('token', '')
+        
+        if not token:
+            return Response('{"error": "请先登录"}', 401, {'Content-Type': 'application/json'})
+        
+        valid, user_id, err_msg = verify_token(token)
+        if not valid:
+            return Response(json.dumps({"error": err_msg}), 401, {'Content-Type': 'application/json'})
+        
+        return f(request, *args, **kwargs)
+    return wrapper
+
+def require_permission(allowed_roles):
+    """
+    装饰器：需要指定角色权限
+    用法：@require_permission(ROLE_ADMIN) 或 @require_permission(['super_admin', 'admin'])
+    """
+    def decorator(f):
+        def wrapper(request, *args, **kwargs):
+            user_id, role = get_operator_role(request)
+            if not user_id:
+                return Response('{"error": "请先登录"}', 401, {'Content-Type': 'application/json'})
+            if role not in allowed_roles:
+                return Response('{"error": "权限不足"}', 403, {'Content-Type': 'application/json'})
+            return f(request, *args, **kwargs)
+        return wrapper
+    return decorator
+
+# 保留原有函数供特殊场景使用
 def check_permission(request, allowed_roles):
-    """
-    检查请求者是否具有指定权限
-    allowed_roles: 允许的角色列表
-    返回: (通过, 错误响应或None)
-    """
-    operator_id, role = get_operator_role(request)
-    if not operator_id:
-        return False, Response('{"error": "未提供操作者身份"}', 401, {'Content-Type': 'application/json'})
+    """检查请求者是否具有指定权限（供特殊场景调用）"""
+    user_id, role = get_operator_role(request)
+    if not user_id:
+        return False, Response('{"error": "请先登录"}', 401, {'Content-Type': 'application/json'})
     if role not in allowed_roles:
         return False, Response('{"error": "权限不足"}', 403, {'Content-Type': 'application/json'})
     return True, None
+
+def check_login(request):
+    """检查请求是否已登录（供特殊场景调用）"""
+    data = request.json if request.json else {}
+    token = request.headers.get('authorization', '').replace('Bearer ', '')
+    if not token:
+        token = request.args.get('token', '') or data.get('token', '')
+    
+    if not token:
+        return False, None, Response('{"error": "请先登录"}', 401, {'Content-Type': 'application/json'})
+    
+    valid, user_id, err_msg = verify_token(token)
+    if valid:
+        return True, user_id, None
+    else:
+        return False, None, Response(json.dumps({"error": err_msg}), 401, {'Content-Type': 'application/json'})
+
+def check_login_get(request):
+    """
+    检查 GET 请求是否已登录（通过Token验证）
+    返回: (已登录, 错误响应或None)
+    """
+    token = request.headers.get('authorization', '').replace('Bearer ', '')
+    if not token:
+        token = request.args.get('token', '')
+    
+    if not token:
+        return False, Response('{"error": "请先登录"}', 401, {'Content-Type': 'application/json'})
+    
+    valid, user_id, err_msg = verify_token(token)
+    if valid:
+        return True, None
+    else:
+        return False, Response(json.dumps({"error": err_msg}), 401, {'Content-Type': 'application/json'})
 
 def record_points_change(member_id, member_name, change, reason):
     """记录积分变动日志"""
@@ -481,14 +719,16 @@ def get_settings():
                 'custom_member_fields': config.get('custom_member_fields', []),
                 'password_salt': config.get('password_salt', 'weilu2018'),
                 'points_name': config.get('points_name', '围炉值'),
-                'system_name': config.get('system_name', '围炉诗社·理事台')
+                'system_name': config.get('system_name', '围炉诗社·理事台'),
+                'token_expire_days': config.get('token_expire_days', DEFAULT_TOKEN_EXPIRE_DAYS)
             }
     except: 
         return {
             'custom_member_fields': [],
             'password_salt': 'weilu2018',
             'points_name': '围炉值',
-            'system_name': '围炉诗社·理事台'
+            'system_name': '围炉诗社·理事台',
+            'token_expire_days': DEFAULT_TOKEN_EXPIRE_DAYS
         }
     
 def save_settings(data):
@@ -499,7 +739,7 @@ def save_settings(data):
             config = json.load(f)
         
         # 更新系统设置部分
-        for key in ['custom_member_fields', 'password_salt', 'points_name', 'system_name']:
+        for key in ['custom_member_fields', 'password_salt', 'points_name', 'system_name', 'token_expire_days']:
             if key in data:
                 config[key] = data[key]
         
@@ -567,6 +807,7 @@ def list_poems(request):
         return []
 
 @api_route('/api/poems', methods=['POST'])
+@require_login
 def create_poem(request):
     if not request.json: return Response('Invalid JSON', 400)
     data = request.json
@@ -584,6 +825,7 @@ def create_poem(request):
     return Response('Write Failed', 500)
 
 @api_route('/api/poems/update', methods=['POST'])
+@require_login
 def update_poem(request):
     if not request.json: return Response('Invalid', 400)
     data = request.json
@@ -606,6 +848,7 @@ def update_poem(request):
     return Response("Poem not found", 404)
 
 @api_route('/api/poems/delete', methods=['POST'])
+@require_login
 def delete_poem(request):
     if not request.json: return Response('Invalid', 400)
     pid = request.json.get('id')
@@ -626,6 +869,7 @@ def list_activities(request):
     except: return []
 
 @api_route('/api/activities', methods=['POST'])
+@require_permission(ROLE_DIRECTOR)
 def create_activity(request):
     if not request.json: return Response('Invalid', 400)
     data = request.json
@@ -639,6 +883,7 @@ def create_activity(request):
     return data
 
 @api_route('/api/activities/update', methods=['POST'])
+@require_permission(ROLE_DIRECTOR)
 def update_activity(request):
     data = request.json
     if not data: return Response('Invalid', 400)
@@ -658,6 +903,7 @@ def update_activity(request):
     return Response("Not Found", 404)
 
 @api_route('/api/activities/delete', methods=['POST'])
+@require_permission(ROLE_DIRECTOR)
 def delete_activity(request):
     pid = request.json.get('id')
     if db_activities.delete(pid): return {"status": "success"}
@@ -665,6 +911,7 @@ def delete_activity(request):
 
 # --- Tasks API ---
 @api_route('/api/tasks', methods=['GET'])
+@require_login
 def list_tasks(request):
     """获取任务列表，支持分页和搜索"""
     try:
@@ -686,10 +933,9 @@ def list_tasks(request):
         return []
 
 @api_route('/api/tasks', methods=['POST'])
+@require_permission(ROLE_DIRECTOR)
 def create_task(request):
-    """创建新任务（仅理事、管理员、超级管理员可创建）
-    支持直接指派任务给特定用户（派发模式）
-    """
+    """创建新任务"""
     data = request.json
     if not data: return Response('Invalid', 400)
     
@@ -726,6 +972,7 @@ def create_task(request):
     return task
 
 @api_route('/api/tasks/claim', methods=['POST'])
+@require_login
 def claim_task(request):
     """领取任务"""
     data = request.json
@@ -750,8 +997,9 @@ def claim_task(request):
     return {"status": "success"}
 
 @api_route('/api/tasks/unclaim', methods=['POST'])
+@require_login
 def unclaim_task(request):
-    """撤销领取任务（仅领取者可操作，仅claimed状态可撤销）"""
+    """撤销领取任务"""
     data = request.json
     tid = data.get('task_id')
     
@@ -771,8 +1019,9 @@ def unclaim_task(request):
     return {"status": "success"}
 
 @api_route('/api/tasks/submit', methods=['POST'])
+@require_login
 def submit_task(request):
-    """提交任务完成（待审批）"""
+    """提交任务完成"""
     data = request.json
     tid = data.get('task_id')
     
@@ -791,8 +1040,9 @@ def submit_task(request):
     return {"status": "success"}
 
 @api_route('/api/tasks/approve', methods=['POST'])
+@require_permission(ROLE_DIRECTOR)
 def approve_task(request):
-    """审批任务（管理角色可直接验收claimed或submitted状态的任务）"""
+    """审批任务"""
     data = request.json
     tid = data.get('task_id')
     force = data.get('force', False)  # 管理员强制验收标志
@@ -851,8 +1101,9 @@ def approve_task(request):
     return {"status": "success", "gained": reward}
 
 @api_route('/api/tasks/reject', methods=['POST'])
+@require_permission(ROLE_DIRECTOR)
 def reject_task(request):
-    """拒绝任务（退回重做）"""
+    """拒绝任务"""
     data = request.json
     tid = data.get('task_id')
     
@@ -871,8 +1122,9 @@ def reject_task(request):
     return {"status": "success"}
 
 @api_route('/api/tasks/delete', methods=['POST'])
+@require_permission(ROLE_DIRECTOR)
 def delete_task(request):
-    """删除任务（仅发布者或管理员可删除）"""
+    """删除任务"""
     data = request.json
     tid = data.get('task_id')
     if db_tasks.delete(tid):
@@ -880,8 +1132,9 @@ def delete_task(request):
     return Response("Error", 500)
 
 @api_route('/api/tasks/complete', methods=['POST'])
+@require_permission(ROLE_DIRECTOR)
 def complete_task(request):
-    """快速完成任务（兼容旧版，直接完成并发放奖励）"""
+    """快速完成任务"""
     data = request.json
     tid = data.get('task_id')
     u_name = data.get('member_name')
@@ -922,32 +1175,38 @@ def complete_task(request):
 # --- Members API ---
 @api_route('/api/members', methods=['GET'])
 def list_members(request):
-    """获取成员列表，支持分页和搜索"""
+    """获取成员列表，支持分页和搜索
+    参数 public=1 时返回公开信息（雅号、围炉值），用于未登录访问
+    """
     try:
         page = int(request.args.get('page', 0))
         limit = int(request.args.get('limit', 0))
         q = request.args.get('q', None)
+        public_mode = request.args.get('public', '0') == '1'
         if q:
             q = simple_unquote(q)
         
         # 如果提供了分页参数，使用分页查询
         if page > 0 and limit > 0:
             items, total = db_members.fetch_page(page, limit, reverse=False, search_term=q)
+            if public_mode:
+                # 公开模式：只返回雅号和围炉值
+                items = [{'id': m.get('id'), 'alias': m.get('alias', ''), 'points': m.get('points', 0)} for m in items]
             return {"data": items, "total": total, "page": page, "limit": limit}
         else:
             # 向后兼容：不带分页参数时返回全部数据
-            return db_members.get_all()
+            members = db_members.get_all()
+            if public_mode:
+                # 公开模式：只返回雅号和围炉值
+                return [{'id': m.get('id'), 'alias': m.get('alias', ''), 'points': m.get('points', 0)} for m in members]
+            return members
     except Exception as e:
         error(f"获取成员列表失败: {e}", "API")
         return []
 
 @api_route('/api/members', methods=['POST'])
+@require_permission(ROLE_DIRECTOR)
 def create_member(request):
-    # 权限验证：理事级别
-    ok, err = check_permission(request, ROLE_DIRECTOR)
-    if not ok:
-        return err
-    
     data = request.json
     if not data: return Response('Invalid', 400)
     
@@ -976,19 +1235,33 @@ def create_member(request):
     return data
 
 @api_route('/api/members/update', methods=['POST'])
+@require_permission(ROLE_DIRECTOR)
 def update_member_route(request):
-    # 权限验证：理事级别
-    ok, err = check_permission(request, ROLE_DIRECTOR)
-    if not ok:
-        return err
-    
     data = request.json
     mid = data.get('id')
+    
+    # 获取操作者角色
+    _, operator_role = get_operator_role(request)
+    
+    # 获取目标成员的当前角色，检查是否有权限管理
+    target_member = None
+    for m in db_members.get_all():
+        if m.get('id') == mid:
+            target_member = m
+            break
+    
+    if not target_member:
+        return Response('{"error": "成员不存在"}', 404, {'Content-Type': 'application/json'})
+    
+    # 检查是否有权限管理此成员
+    target_member_role = target_member.get('role', 'member')
+    allowed, manage_err = can_manage_member(operator_role, target_member_role)
+    if not allowed:
+        return Response(json.dumps({"error": manage_err}), 403, {'Content-Type': 'application/json'})
     
     # 如果更新角色，验证角色权限
     if 'role' in data:
         target_role = data.get('role')
-        _, operator_role = get_operator_role(request)
         allowed, role_err = can_assign_role(operator_role, target_role)
         if not allowed:
             return Response(json.dumps({"error": role_err}), 400, {'Content-Type': 'application/json'})
@@ -1032,7 +1305,12 @@ def update_member_route(request):
 
 @api_route('/api/members/change_password', methods=['POST'])
 def change_password_route(request):
-    """用户修改自己的密码"""
+    """用户修改自己的密码（需要登录）"""
+    # 登录验证
+    ok, user_id, err = check_login(request)
+    if not ok:
+        return err
+    
     data = request.json
     member_id = data.get('id')
     old_password = data.get('old_password', '')
@@ -1067,12 +1345,8 @@ def change_password_route(request):
     return Response('{"error": "更新失败"}', 500, {'Content-Type': 'application/json'})
 
 @api_route('/api/members/delete', methods=['POST'])
+@require_permission(['super_admin'])
 def delete_member_route(request):
-    # 权限验证：超级管理员级别
-    ok, err = check_permission(request, ['super_admin'])
-    if not ok:
-        return err
-    
     member_id = request.json.get('id')
     
     # 检查要删除的成员是否是超级管理员
@@ -1092,11 +1366,9 @@ def yearly_points_ranking(request):
         t[0] - 1, t[1], t[2]
     )
     
-    # 统计每个成员最近1年的积分变动
+    # 统计每个成员最近1年的积分变动（流式处理，不加载全部日志）
     member_yearly_points = {}
-    logs = db_points_logs.get_all()
-    
-    for log in logs:
+    for log in db_points_logs.iter_records():
         ts = log.get('timestamp', '')
         if ts >= one_year_ago:
             mid = log.get('member_id')
@@ -1105,9 +1377,8 @@ def yearly_points_ranking(request):
                 member_yearly_points[mid] = {'points': 0, 'name': log.get('member_name', '')}
             member_yearly_points[mid]['points'] += change
     
-    # 获取成员的雅号信息
-    members = db_members.get_all()
-    member_alias_map = {m.get('id'): m.get('alias', '') for m in members}
+    # 获取成员的雅号信息（成员数据量小，可以直接加载）
+    member_alias_map = {m.get('id'): m.get('alias', '') for m in db_members.iter_records()}
     
     # 转换为列表并排序，添加雅号字段
     ranking = [
@@ -1142,6 +1413,10 @@ def login_route(request):
                     if m.get('phone') == p and verify_password(pw, m.get('password', '')):
                         m_safe = m.copy()
                         if 'password' in m_safe: del m_safe['password']
+                        # 生成登录Token
+                        token, expires_in = generate_token(m.get('id'))
+                        m_safe['token'] = token
+                        m_safe['expires_in'] = expires_in  # 有效期秒数，前端自行计算过期时间
                         # 记录登录成功日志
                         record_login_log(m.get('id'), m.get('name', '未知'), p, 'success')
                         return m_safe
@@ -1156,20 +1431,20 @@ def login_route(request):
 
 @api_route('/api/profile/update', methods=['POST'])
 def update_profile(request):
-    """更新个人资料（用户只能修改自己的基本信息）"""
+    """更新个人资料（需要登录，只能修改自己的资料）"""
+    # 登录验证
+    ok, token_user_id, err = check_login(request)
+    if not ok:
+        return err
+    
     data = request.json
     if not data:
         return Response('{"error": "无效的请求数据"}', 400, {'Content-Type': 'application/json'})
     
     user_id = data.get('id')
-    operator_id = data.get('operator_id')
-    
-    # 验证操作者身份
-    if not operator_id:
-        return Response('{"error": "未提供操作者身份"}', 401, {'Content-Type': 'application/json'})
     
     # 只能修改自己的资料
-    if user_id != operator_id:
+    if user_id != token_user_id:
         return Response('{"error": "只能修改自己的资料"}', 403, {'Content-Type': 'application/json'})
     
     # 只允许修改有限的字段（alias, birthday）
@@ -1190,17 +1465,15 @@ def update_profile(request):
 
 # --- Finance API ---
 @api_route('/api/finance', methods=['GET'])
+@require_login
 def list_finance(request):
+    """获取财务记录列表（需要登录）"""
     items, _ = db_finance.fetch_page(1, 100, reverse=True)
     return items
 
 @api_route('/api/finance', methods=['POST'])
+@require_permission(ROLE_FINANCE)
 def add_finance(request):
-    # 权限验证：财务级别
-    ok, err = check_permission(request, ROLE_FINANCE)
-    if not ok:
-        return err
-    
     data = request.json
     
     # 必填项验证
@@ -1213,13 +1486,9 @@ def add_finance(request):
     return data
 
 @api_route('/api/finance/update', methods=['POST'])
+@require_permission(ROLE_FINANCE)
 def update_finance(request):
     """更新财务记录"""
-    # 权限验证：财务级别
-    ok, err = check_permission(request, ROLE_FINANCE)
-    if not ok:
-        return err
-    
     data = request.json
     if not data or 'id' not in data:
         return Response('{"error": "缺少记录ID"}', 400, {'Content-Type': 'application/json'})
@@ -1241,13 +1510,9 @@ def update_finance(request):
     return Response('{"error": "记录不存在"}', 404, {'Content-Type': 'application/json'})
 
 @api_route('/api/finance/delete', methods=['POST'])
+@require_permission(ROLE_FINANCE)
 def delete_finance(request):
     """删除财务记录"""
-    # 权限验证：财务级别
-    ok, err = check_permission(request, ROLE_FINANCE)
-    if not ok:
-        return err
-    
     data = request.json
     if not data or 'id' not in data:
         return Response('{"error": "缺少记录ID"}', 400, {'Content-Type': 'application/json'})
@@ -1259,8 +1524,9 @@ def delete_finance(request):
 
 # --- Login Logs API ---
 @api_route('/api/login_logs', methods=['GET'])
+@require_login
 def list_login_logs(request):
-    """获取登录日志（最近20条）"""
+    """获取登录日志（需要登录）"""
     items, _ = db_login_logs.fetch_page(1, 20, reverse=True)
     return items
 
@@ -1281,58 +1547,60 @@ def settings_fields(request):
 
 @api_route('/api/settings/system', methods=['GET', 'POST'])
 def settings_system(request):
-    """获取或更新系统设置（系统名称、salt和积分名称）"""
+    """获取或更新系统设置（系统名称、积分名称）"""
     s = get_settings()
     if request.method == 'GET':
+        # 公开返回系统名称和积分名称，不返回敏感的salt
         return {
             "system_name": s.get('system_name', '围炉诗社·理事台'),
-            "password_salt": s.get('password_salt', 'weilu2018'),
             "points_name": s.get('points_name', '围炉值')
         }
     else:
         data = request.json
-        # 修改Salt需要管理员权限
-        if 'password_salt' in data:
-            ok, err = check_permission(request, ROLE_ADMIN)
-            if not ok:
-                return err
-            s['password_salt'] = data['password_salt']
         # 修改系统名称和积分名称需要理事权限
-        if 'system_name' in data or 'points_name' in data:
-            ok, err = check_permission(request, ROLE_DIRECTOR)
-            if not ok:
-                return err
-            if 'system_name' in data:
-                s['system_name'] = data['system_name']
-            if 'points_name' in data:
-                s['points_name'] = data['points_name']
+        ok, err = check_permission(request, ROLE_DIRECTOR)
+        if not ok:
+            return err
+        if 'system_name' in data:
+            s['system_name'] = data['system_name']
+        if 'points_name' in data:
+            s['points_name'] = data['points_name']
         save_settings(s)
         return {"status": "success"}
 
-# --- 密码迁移接口 (一次性使用) ---
-@api_route('/api/migrate_passwords', methods=['POST'])
-def migrate_passwords(request):
-    """将所有明文密码迁移为SHA256哈希值"""
-    # 权限验证：管理员级别
-    ok, err = check_permission(request, ROLE_ADMIN)
-    if not ok:
-        return err
-    
-    migrated = 0
-    try:
-        members = db_members.get_all()
-        for m in members:
-            pwd = m.get('password', '')
-            # 如果密码不是64位哈希值，则进行迁移
-            if pwd and len(pwd) != 64:
-                def updater(record):
-                    record['password'] = hash_password(pwd)
-                if db_members.update(m.get('id'), updater):
-                    migrated += 1
-        gc.collect()
-        return {"status": "success", "migrated": migrated}
-    except Exception as e:
-        return Response(f"Migration error: {e}", 500)
+@api_route('/api/settings/salt', methods=['GET', 'POST'])
+@require_permission(ROLE_ADMIN)
+def settings_salt(request):
+    """获取或更新密码盐值（管理员权限）"""
+    s = get_settings()
+    if request.method == 'GET':
+        return {"password_salt": s.get('password_salt', 'weilu2018')}
+    else:
+        data = request.json
+        if 'password_salt' in data:
+            s['password_salt'] = data['password_salt']
+            save_settings(s)
+        return {"status": "success"}
+
+@api_route('/api/settings/token_expire', methods=['GET', 'POST'])
+@require_permission(ROLE_ADMIN)
+def settings_token_expire(request):
+    """获取或更新登录有效期（管理员权限）"""
+    s = get_settings()
+    if request.method == 'GET':
+        return {"token_expire_days": s.get('token_expire_days', DEFAULT_TOKEN_EXPIRE_DAYS)}
+    else:
+        data = request.json
+        if 'token_expire_days' in data:
+            days = int(data['token_expire_days'])
+            # 限制有效期范围：1-365天
+            if days < 1:
+                days = 1
+            elif days > 365:
+                days = 365
+            s['token_expire_days'] = days
+            save_settings(s)
+        return {"status": "success"}
 
 # --- WiFi 配置接口 ---
 def get_wifi_config():
@@ -1376,8 +1644,9 @@ def save_wifi_config(data):
         return False
 
 @api_route('/api/wifi/config', methods=['GET', 'POST'])
+@require_permission(ROLE_ADMIN)
 def wifi_config(request):
-    """获取或更新WiFi配置"""
+    """获取或更新WiFi配置（管理员权限）"""
     if request.method == 'GET':
         config = get_wifi_config()
         # 返回配置（密码用星号隐藏）
@@ -1394,11 +1663,6 @@ def wifi_config(request):
             "ap_ip": config.get('ap_ip', '192.168.18.1')
         }
     else:
-        # 权限验证：管理员级别
-        ok, err = check_permission(request, ROLE_ADMIN)
-        if not ok:
-            return err
-        
         data = request.json
         config = get_wifi_config()
         
@@ -1434,8 +1698,9 @@ def wifi_config(request):
             return Response('{"error": "保存失败"}', 500, {'Content-Type': 'application/json'})
 
 @api_route('/api/system/info')
+@require_login
 def sys_info(request):
-    """获取系统信息，包括内存、存储、运行时间、WiFi信号、系统时间和CPU温度"""
+    """获取系统信息（登录用户可查看）"""
     try:
         gc.collect()
         s = os.statvfs('/')
@@ -1458,16 +1723,31 @@ def sys_info(request):
             t[0], t[1], t[2], t[3], t[4], t[5]
         )
         
-        # 获取WiFi信号强度
+        # 获取WiFi信号强度和模式
         wifi_rssi = None
         wifi_ssid = None
+        wifi_mode = None  # 'STA' 或 'AP'（兼容旧逻辑）
+        sta_active = False  # STA模式是否激活并连接
+        ap_active = False   # AP模式是否激活
         try:
-            wlan = network.WLAN(network.STA_IF)
-            if wlan.active() and wlan.isconnected():
-                wifi_rssi = wlan.status('rssi')
-                wifi_ssid = wlan.config('essid')
+            wlan_sta = network.WLAN(network.STA_IF)
+            wlan_ap = network.WLAN(network.AP_IF)
+            
+            # 检测STA模式
+            if wlan_sta.active() and wlan_sta.isconnected():
+                sta_active = True
+                wifi_mode = 'STA'
+                wifi_rssi = wlan_sta.status('rssi')
+                wifi_ssid = wlan_sta.config('essid')
+            
+            # 检测AP模式（独立检测，不是elif）
+            if wlan_ap.active():
+                ap_active = True
+                if wifi_mode is None:
+                    wifi_mode = 'AP'
+                    wifi_ssid = wlan_ap.config('essid')
         except Exception as e:
-            debug(f"获取WiFi信号失败: {e}", "System")
+            debug(f"获取WiFi信息失败: {e}", "System")
         
         # 尝试获取CPU温度
         cpu_temp = None
@@ -1489,6 +1769,9 @@ def sys_info(request):
             "system_time": system_time,
             "wifi_rssi": wifi_rssi,
             "wifi_ssid": wifi_ssid,
+            "wifi_mode": wifi_mode,
+            "sta_active": sta_active,
+            "ap_active": ap_active,
             "cpu_temp": cpu_temp
         }
     except Exception as e:
@@ -1496,51 +1779,25 @@ def sys_info(request):
         return {}
 
 @api_route('/api/system/stats')
+@require_login
 def sys_stats(request):
-    """获取各模块数据统计"""
+    """获取各模块数据统计（登录用户可查看）"""
     try:
-        # 统计各模块数量
-        members_count = len(db_members.get_all())
-        poems_count = len(db_poems.get_all())
-        activities_count = len(db_activities.get_all())
-        tasks_count = len(db_tasks.get_all())
-        finance_count = len(db_finance.get_all())
-        
-        gc.collect()
-        
         return {
-            "members": members_count,
-            "poems": poems_count,
-            "activities": activities_count,
-            "tasks": tasks_count,
-            "finance": finance_count
+            "members": db_members.count(),
+            "poems": db_poems.count(),
+            "activities": db_activities.count(),
+            "tasks": db_tasks.count(),
+            "finance": db_finance.count()
         }
     except Exception as e:
         error(f"获取统计数据失败: {e}", "Stats")
         return {}
 
 @api_route('/api/backup/export')
+@require_permission(ROLE_ADMIN)
 def backup_export(request):
-    """导出全站数据备份"""
-    # 权限验证：管理员级别（通过URL参数验证）
-    try:
-        operator_id = int(request.args.get('operator_id', 0))
-        if operator_id:
-            with open(db_members.filepath, 'r') as f:
-                for line in f:
-                    try:
-                        m = json.loads(line)
-                        if m.get('id') == operator_id:
-                            if m.get('role') not in ROLE_ADMIN:
-                                return Response('{"error": "权限不足"}', 403, {'Content-Type': 'application/json'})
-                            break
-                    except:
-                        pass
-        else:
-            return Response('{"error": "未提供操作者身份"}', 401, {'Content-Type': 'application/json'})
-    except:
-        return Response('{"error": "权限验证失败"}', 401, {'Content-Type': 'application/json'})
-    
+    """导出全站数据备份（管理员权限）"""
     try:
         # 获取WiFi配置（包含密码）
         wifi_config = get_wifi_config()
@@ -1592,32 +1849,9 @@ def backup_export(request):
         return Response('{"error": "导出失败"}', 500, {'Content-Type': 'application/json'})
 
 @api_route('/api/backup/import', methods=['POST'])
+@require_permission(ROLE_ADMIN)
 def backup_import(request):
-    """导入数据备份"""
-    # 权限验证：管理员级别（通过URL参数验证，避免大JSON解析问题）
-    try:
-        operator_id = int(request.args.get('operator_id', 0))
-        if operator_id:
-            with open(db_members.filepath, 'r') as f:
-                found = False
-                for line in f:
-                    try:
-                        m = json.loads(line)
-                        if m.get('id') == operator_id:
-                            if m.get('role') not in ROLE_ADMIN:
-                                return Response('{"error": "权限不足"}', 403, {'Content-Type': 'application/json'})
-                            found = True
-                            break
-                    except:
-                        pass
-                if not found:
-                    return Response('{"error": "操作者不存在"}', 401, {'Content-Type': 'application/json'})
-        else:
-            return Response('{"error": "未提供操作者身份"}', 401, {'Content-Type': 'application/json'})
-    except Exception as e:
-        debug(f"备份导入权限验证失败: {e}", "Backup")
-        return Response('{"error": "权限验证失败"}', 401, {'Content-Type': 'application/json'})
-    
+    """导入数据备份（管理员权限）"""
     try:
         # 喂狗，防止处理大数据时超时
         watchdog.feed()
@@ -1769,6 +2003,188 @@ def backup_import(request):
     except Exception as e:
         error(f"备份导入失败: {e}", "Backup")
         return Response('{"error": "导入失败"}', 500, {'Content-Type': 'application/json'})
+
+# --- 分表备份API（支持大数据量） ---
+# 数据表映射
+BACKUP_TABLES = {
+    'members': db_members,
+    'poems': db_poems,
+    'activities': db_activities,
+    'tasks': db_tasks,
+    'finance': db_finance,
+    'points_logs': db_points_logs,
+    'login_logs': db_login_logs
+}
+
+@api_route('/api/backup/tables')
+@require_permission(ROLE_ADMIN)
+def backup_list_tables(request):
+    """获取可备份的表列表（管理员权限）"""
+    return {"tables": list(BACKUP_TABLES.keys()) + ['settings', 'wifi_config', 'system_config']}
+
+@api_route('/api/backup/export-table')
+@require_permission(ROLE_ADMIN)
+def backup_export_table(request):
+    """分表导出（管理员权限）
+    查询参数：name=表名, page=页码(可选), limit=每页条数(可选,默认100)
+    返回：{table, data, page, total, hasMore}
+    """
+    # 获取表名
+    table = request.args.get('name', '')
+    if not table:
+        return Response('{"error": "未指定表名"}', 400, {'Content-Type': 'application/json'})
+    
+    # 获取分页参数
+    page = int(request.args.get('page', 1))
+    limit = int(request.args.get('limit', 100))
+    
+    watchdog.feed()
+    gc.collect()
+    
+    try:
+        if table in BACKUP_TABLES:
+            # JSONL 数据表 - 使用分页读取避免内存溢出
+            data, total = BACKUP_TABLES[table].fetch_page(page=page, limit=limit, reverse=False)
+            gc.collect()
+            has_more = (page * limit) < total
+            return {"table": table, "data": data, "page": page, "total": total, "hasMore": has_more}
+        
+        elif table == 'settings':
+            return {"table": table, "data": get_settings(), "page": 1, "total": 1, "hasMore": False}
+        
+        elif table == 'wifi_config':
+            wifi_config = get_wifi_config()
+            return {"table": table, "data": {
+                "wifi_ssid": wifi_config.get('wifi_ssid', ''),
+                "wifi_password": wifi_config.get('wifi_password', ''),
+                "sta_use_static_ip": wifi_config.get('sta_use_static_ip', False),
+                "sta_ip": wifi_config.get('sta_ip', ''),
+                "sta_subnet": wifi_config.get('sta_subnet', '255.255.255.0'),
+                "sta_gateway": wifi_config.get('sta_gateway', ''),
+                "sta_dns": wifi_config.get('sta_dns', '8.8.8.8'),
+                "ap_ssid": wifi_config.get('ap_ssid', ''),
+                "ap_password": wifi_config.get('ap_password', ''),
+                "ap_ip": wifi_config.get('ap_ip', '192.168.18.1')
+            }, "page": 1, "total": 1, "hasMore": False}
+        
+        elif table == 'system_config':
+            try:
+                with open('data/config.json', 'r') as f:
+                    config = json.load(f)
+                return {"table": table, "data": {
+                    "debug_mode": config.get('debug_mode', False),
+                    "watchdog_enabled": config.get('watchdog_enabled', True),
+                    "watchdog_timeout": config.get('watchdog_timeout', 120)
+                }, "page": 1, "total": 1, "hasMore": False}
+            except:
+                return {"table": table, "data": {"debug_mode": False, "watchdog_enabled": True, "watchdog_timeout": 120}, "page": 1, "total": 1, "hasMore": False}
+        
+        else:
+            return Response('{"error": "未知的表名"}', 400, {'Content-Type': 'application/json'})
+    
+    except Exception as e:
+        error(f"分表导出失败 [{table}]: {e}", "Backup")
+        return Response(f'{{"error": "导出失败: {str(e)}"}}', 500, {'Content-Type': 'application/json'})
+
+@api_route('/api/backup/import-table', methods=['POST'])
+@require_permission(ROLE_ADMIN)
+def backup_import_table(request):
+    """分表导入（管理员权限）
+    查询参数：name=表名
+    """
+    # 获取表名
+    table = request.args.get('name', '')
+    info(f"分表导入请求: table={table}", "Backup")
+    
+    if not table:
+        return Response('{"error": "未指定表名"}', 400, {'Content-Type': 'application/json'})
+    
+    watchdog.feed()
+    gc.collect()
+    
+    try:
+        data = request.json
+        # 如果 request.json 为空，尝试手动解析（大请求体跳过了自动解析）
+        if not data and request.body:
+            try:
+                # 确保是字符串类型（MicroPython的json.loads可能不支持bytes）
+                body_str = request.body
+                if isinstance(body_str, bytes):
+                    body_str = body_str.decode('utf-8')
+                data = json.loads(body_str)
+            except Exception as parse_err:
+                error(f"分表导入 [{table}]: JSON解析失败 - {parse_err}", "Backup")
+                return Response('{"error": "JSON解析失败"}', 400, {'Content-Type': 'application/json'})
+        
+        if not data or 'data' not in data:
+            error(f"分表导入 [{table}]: 缺少data字段", "Backup")
+            return Response('{"error": "缺少数据内容"}', 400, {'Content-Type': 'application/json'})
+        
+        table_data = data['data']
+        # 获取导入模式：overwrite(覆盖,默认) 或 append(追加,用于分批导入)
+        mode = request.args.get('mode', 'overwrite')
+        info(f"分表导入 [{table}]: 开始处理, 记录数={len(table_data) if isinstance(table_data, list) else 'N/A'}, 模式={mode}", "Backup")
+        
+        if table in BACKUP_TABLES:
+            # JSONL 数据表 - 根据模式选择写入方式
+            filepath = f'data/{table}.jsonl'
+            file_mode = 'w' if mode == 'overwrite' else 'a'
+            with open(filepath, file_mode) as f:
+                for item in table_data:
+                    f.write(json.dumps(item) + "\n")
+            gc.collect()
+            watchdog.feed()
+            info(f"分表导入 [{table}]: 成功写入 {len(table_data)} 条记录", "Backup")
+            return {"status": "success", "table": table, "count": len(table_data)}
+        
+        elif table == 'settings':
+            # 从配置文件读取完整的配置
+            with open('data/config.json', 'r') as f:
+                config = json.load(f)
+            # 合并设置数据
+            for key in ['custom_member_fields', 'password_salt', 'points_name', 'system_name']:
+                if key in table_data:
+                    config[key] = table_data[key]
+            with open('data/config.json', 'w') as f:
+                json.dump(config, f)
+            gc.collect()
+            return {"status": "success", "table": table}
+        
+        elif table == 'wifi_config':
+            existing_config = get_wifi_config()
+            existing_config['wifi_ssid'] = table_data.get('wifi_ssid', existing_config.get('wifi_ssid', ''))
+            if 'wifi_password' in table_data and table_data['wifi_password']:
+                existing_config['wifi_password'] = table_data['wifi_password']
+            existing_config['sta_use_static_ip'] = table_data.get('sta_use_static_ip', False)
+            existing_config['sta_ip'] = table_data.get('sta_ip', '')
+            existing_config['sta_subnet'] = table_data.get('sta_subnet', '255.255.255.0')
+            existing_config['sta_gateway'] = table_data.get('sta_gateway', '')
+            existing_config['sta_dns'] = table_data.get('sta_dns', '8.8.8.8')
+            existing_config['ap_ssid'] = table_data.get('ap_ssid', existing_config.get('ap_ssid', ''))
+            if 'ap_password' in table_data and table_data['ap_password']:
+                existing_config['ap_password'] = table_data['ap_password']
+            existing_config['ap_ip'] = table_data.get('ap_ip', '192.168.18.1')
+            save_wifi_config(existing_config)
+            gc.collect()
+            return {"status": "success", "table": table}
+        
+        elif table == 'system_config':
+            with open('data/config.json', 'r') as f:
+                config = json.load(f)
+            for key in ['debug_mode', 'watchdog_enabled', 'watchdog_timeout']:
+                if key in table_data:
+                    config[key] = table_data[key]
+            with open('data/config.json', 'w') as f:
+                json.dump(config, f)
+            gc.collect()
+            return {"status": "success", "table": table}
+        
+        else:
+            return Response('{"error": "未知的表名"}', 400, {'Content-Type': 'application/json'})
+    
+    except Exception as e:
+        error(f"分表导入失败 [{table}]: {e}", "Backup")
+        return Response(f'{{"error": "导入失败: {str(e)}"}}', 500, {'Content-Type': 'application/json'})
 
 if __name__ == '__main__':
     try:

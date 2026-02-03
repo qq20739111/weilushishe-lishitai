@@ -39,10 +39,14 @@ class Request:
 
         if 'content-length' in self.headers:
             length = int(self.headers['content-length'])
-            # 分块读取大请求体，避免一次性分配大内存
-            if length > 8192:  # 大于8KB时分块读取
-                import gc
-                gc.collect()  # 读取前先释放内存
+            # 限制单次请求最大大小为600KB，防止内存溢出
+            if length > 614400:  # 600KB
+                return False  # 请求太大，拒绝处理
+            # 统一使用循环读取，确保完整读取所有数据
+            # 异步网络I/O中单次read可能不返回所有请求的数据
+            import gc
+            gc.collect()  # 读取前先释放内存
+            if length > 4096:
                 chunks = []
                 remaining = length
                 chunk_size = 4096
@@ -57,7 +61,16 @@ class Request:
                 chunks = None  # 释放临时列表
                 gc.collect()
             else:
-                self.body = await self.reader.read(length)
+                # 小请求也需要确保完整读取
+                chunks = []
+                remaining = length
+                while remaining > 0:
+                    chunk = await self.reader.read(remaining)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    remaining -= len(chunk)
+                self.body = b''.join(chunks) if len(chunks) > 1 else (chunks[0] if chunks else b'')
             # 使用 startswith 匹配，支持 application/json; charset=utf-8 等变体
             # 大请求体跳过自动JSON解析，由业务层处理
             content_type = self.headers.get('content-type', '')
@@ -123,6 +136,7 @@ class Microdot:
         return decorator
 
     async def handle_request(self, reader, writer):
+        import gc
         req = Request(reader)
         if not await req.read_request():
             writer.close()
@@ -163,6 +177,11 @@ class Microdot:
         if isinstance(res, dict) or isinstance(res, list):
             import json
             res = Response(json.dumps(res), headers={'Content-Type': 'application/json'})
+        
+        # 释放请求体内存，防止大请求累积
+        req.body = None
+        req.json = None
+        gc.collect()
             
         try:
             await res.write(writer)
@@ -170,6 +189,9 @@ class Microdot:
             await writer.wait_closed()
         except OSError:
             pass # Connection reset by peer or closed prematurely
+        
+        # 请求完成后再次释放内存
+        gc.collect()
 
 
     def run(self, host='0.0.0.0', port=80):

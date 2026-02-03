@@ -7,8 +7,8 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <!-- Login Section -->
-    <section id="login-section" style="display: flex; height: 100vh; justify-content: center; align-items: center; background: var(--bg);">
+    <!-- Login Section (默认隐藏) -->
+    <section id="login-section" style="display:none; height: 100vh; justify-content: center; align-items: center; background: var(--bg);">
         <div class="card" style="width: 100%; max-width: 400px; text-align: center;">
             <div style="margin-bottom: 20px;">
                 <img src="/static/logo.png" alt="Logo" style="height: 80px;">
@@ -30,12 +30,13 @@
                 <div class="nav-links" id="nav-links">
                     <a href="#" onclick="showSection('activities'); closeMobileMenu();">活动</a>
                     <a href="#" onclick="showSection('poems'); closeMobileMenu();">藏诗阁</a>
-                    <a href="#" onclick="showSection('tasks'); closeMobileMenu();">事务</a>
-                    <a href="#" onclick="showSection('finance'); closeMobileMenu();">财务</a>
+                    <a href="#" onclick="showSection('tasks'); closeMobileMenu();" class="nav-login-required">事务</a>
+                    <a href="#" onclick="showSection('finance'); closeMobileMenu();" class="nav-login-required">财务</a>
                     <a href="#" onclick="showSection('members'); closeMobileMenu();">社员</a>
-                    <a href="#" onclick="showSection('admin'); closeMobileMenu();">系统</a>
-                    <a href="#" class="nav-user-link" onclick="openProfileModal(); closeMobileMenu();" id="nav-current-user"></a>
-                    <a href="#" onclick="logout(); closeMobileMenu();" style="color: #e74c3c;">退出</a>
+                    <a href="#" onclick="showSection('admin'); closeMobileMenu();" class="nav-login-required">系统</a>
+                    <a href="#" class="nav-user-link nav-login-required" onclick="openProfileModal(); closeMobileMenu();" id="nav-current-user"></a>
+                    <a href="#" onclick="logout(); closeMobileMenu();" class="nav-login-required" style="color: #e74c3c;">退出</a>
+                    <a href="#" onclick="showLoginPage(); closeMobileMenu();" id="nav-login-btn" class="nav-guest-only" style="color: var(--accent); font-weight: 500;">登录</a>
                 </div>
             </div>
         </nav>
@@ -195,10 +196,10 @@
                         </div>
                         <ul class="role-perms">
                             <li>超管外所有权限</li>
-                            <li>社员信息与角色管理</li>
+                            <li>管理理事及以下角色</li>
                             <li>WiFi与Salt设置</li>
                             <li>登录日志与备份</li>
-                            <li class="perm-deny">不可改超管密码</li>
+                            <li class="perm-deny">不可管理超级管理员</li>
                         </ul>
                     </div>
                     <div class="role-card">
@@ -207,10 +208,10 @@
                         </div>
                         <ul class="role-perms">
                             <li>发起活动与事务</li>
-                            <li>社员信息管理</li>
+                            <li>管理普通社员</li>
                             <li>审批任务验收</li>
                             <li class="perm-deny">不可改Salt/WiFi</li>
-                            <li class="perm-deny">不可改管理员密码</li>
+                            <li class="perm-deny">不可管理管理员及以上</li>
                         </ul>
                     </div>
                     <div class="role-card">
@@ -221,8 +222,8 @@
                             <li>普通社员权限</li>
                             <li>财务记账操作</li>
                             <li>收支明细管理</li>
-                            <li class="perm-deny">无管理员权限</li>
-                            <li class="perm-deny">无理事权限</li>
+                            <li class="perm-deny">无社员管理权限</li>
+                            <li class="perm-deny">不可管理理事及以上</li>
                         </ul>
                     </div>
                     <div class="role-card">
@@ -265,7 +266,7 @@
                 <!-- STA模式 -->
                 <div style="margin-bottom:20px; padding-bottom:20px; border-bottom:1px solid #eee;">
                     <h4 style="font-size:0.95em; color:#333; margin-bottom:15px; display:flex; align-items:center;">
-                        <span style="background:var(--accent); color:#fff; width:20px; height:20px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:0.75em; margin-right:8px;">1</span>
+                        <span id="wifi-mode-sta-badge" style="background:#6c757d; color:#fff; width:20px; height:20px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:0.75em; margin-right:8px;">1</span>
                         STA模式（连接WiFi）
                     </h4>
                     <div class="wifi-form-grid" style="margin-bottom:15px;">
@@ -324,7 +325,7 @@
                 <!-- AP模式 -->
                 <div style="margin-bottom:20px;">
                     <h4 style="font-size:0.95em; color:#333; margin-bottom:15px; display:flex; align-items:center;">
-                        <span style="background:#6c757d; color:#fff; width:20px; height:20px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:0.75em; margin-right:8px;">2</span>
+                        <span id="wifi-mode-ap-badge" style="background:#6c757d; color:#fff; width:20px; height:20px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:0.75em; margin-right:8px;">2</span>
                         AP模式（热点）
                     </h4>
                     <p style="font-size:0.8em; color:#888; margin-bottom:12px;">WiFi连接失败时自动启用，用于首次配置或应急访问</p>
@@ -376,18 +377,21 @@
 
             <div class="card admin-only-card" style="margin-top:20px;">
                 <h3>安全设置</h3>
-                <div style="margin-bottom:15px;">
+                <div>
                     <label style="display:block; font-size:0.85em; color:#666; margin-bottom:6px;">密码加盐值 (Salt)</label>
                     <div class="admin-field-row">
                         <input type="text" id="setting-password-salt" placeholder="weilu2018" style="flex:1;">
                         <button onclick="savePasswordSalt()" style="background:#e67e22;">保存</button>
                     </div>
-                    <p style="font-size:0.8em; color:#e74c3c; margin-top:8px;">注意：修改Salt后需要重新迁移所有密码！</p>
+                    <p style="font-size:0.8em; color:#e74c3c; margin-top:8px;">注意：修改Salt后所有现有密码将失效，需要重置！</p>
                 </div>
-                <div>
-                    <label style="display:block; font-size:0.85em; color:#666; margin-bottom:6px;">密码迁移</label>
-                    <p style="font-size:0.8em; color:#666; margin-bottom:8px;">将明文密码转换为哈希存储</p>
-                    <button onclick="migratePasswords()" style="background:#e67e22;">执行密码迁移</button>
+                <div style="margin-top:20px;">
+                    <label style="display:block; font-size:0.85em; color:#666; margin-bottom:6px;">登录有效期 (天)</label>
+                    <div class="admin-field-row">
+                        <input type="number" id="setting-token-expire-days" min="1" max="365" placeholder="30" style="flex:1;">
+                        <button onclick="saveTokenExpireDays()" style="background:#e67e22;">保存</button>
+                    </div>
+                    <p style="font-size:0.8em; color:#666; margin-top:8px;">设置用户登录后的会话有效期，范围1-365天，默认30天。</p>
                 </div>
             </div>
 
@@ -626,6 +630,23 @@
             <div id="view-act-container" style="color:#444;"></div>
             
             <div id="view-act-actions" style="margin-top:20px; padding-top:15px; border-top:1px solid #eee; display:flex; justify-content:flex-end; gap:10px;"></div>
+        </div>
+    </div>
+    
+    <!-- Backup Progress Modal -->
+    <div id="modal-backup-progress" class="modal" style="z-index:10000; display:none; align-items:center; justify-content:center;">
+        <div class="modal-content" style="max-width:360px; margin:auto; padding:20px 25px;">
+            <h3 id="backup-progress-title" style="margin:0 0 15px 0; font-size:1.1em;">数据备份中...</h3>
+            <div style="margin-bottom:12px;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:6px; font-size:0.9em;">
+                    <span id="backup-progress-status">准备中...</span>
+                    <span id="backup-progress-percent">0%</span>
+                </div>
+                <div style="background:#e0e0e0; border-radius:4px; height:16px; overflow:hidden;">
+                    <div id="backup-progress-bar" style="background:var(--accent); height:100%; width:0%; transition:width 0.3s;"></div>
+                </div>
+            </div>
+            <p id="backup-progress-detail" style="font-size:0.8em; color:#888; margin:0;">正在处理...</p>
         </div>
     </div>
     

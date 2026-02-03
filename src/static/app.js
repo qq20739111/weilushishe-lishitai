@@ -23,7 +23,10 @@
 const API_BASE = '/api';
 let currentUser = null;
 let _customFields = [];
-let _systemSettings = { points_name: '围炉值', password_salt: 'weilu2018' };
+let _systemSettings = { points_name: '围炉值' };
+
+// Token过期时间（30天）
+const TOKEN_EXPIRE_DAYS = 30;
 
 // 角色权限层级（数字越小权限越高）
 const ROLE_LEVEL = {
@@ -61,17 +64,14 @@ function canAssignRole(targetRole) {
 }
 
 /**
- * 获取当前操作者ID，用于后端权限验证
+ * 将token添加到请求数据中
  */
-function getOperatorId() {
-    return currentUser ? currentUser.id : null;
-}
-
-/**
- * 将operator_id添加到请求数据中
- */
-function withOperator(data) {
-    return { ...data, operator_id: getOperatorId() };
+function withToken(data) {
+    const token = getAuthToken();
+    if (token) {
+        return { ...data, token };
+    }
+    return data;
 }
 
 // --- 移动端菜单控制 ---
@@ -178,8 +178,49 @@ const LocalDrafts = {
 // ============================================================================
 
 /**
+ * 检查Token是否已过期
+ * @returns {boolean} true表示已过期
+ */
+function isTokenExpired() {
+    if (!currentUser || !currentUser.token_expire) {
+        return true;
+    }
+    // token_expire 是时间戳（秒），与当前时间比较
+    const now = Math.floor(Date.now() / 1000);
+    return now > currentUser.token_expire;
+}
+
+/**
+ * 获取当前用户的Token
+ * @returns {string|null} Token字符串或null
+ */
+function getAuthToken() {
+    if (!currentUser || !currentUser.token) {
+        return null;
+    }
+    if (isTokenExpired()) {
+        // Token已过期，清除登录状态
+        handleTokenExpired();
+        return null;
+    }
+    return currentUser.token;
+}
+
+/**
+ * 处理Token过期的情况
+ */
+function handleTokenExpired() {
+    localStorage.removeItem('user');
+    currentUser = null;
+    updateNavForLoginState();
+    alert('登录已过期，请重新登录');
+    showLoginPage();
+}
+
+/**
  * 检查用户登录状态
- * 从localStorage读取用户信息，如已登录则显示主应用界面
+ * 从localStorage读取用户信息，验证Token是否过期
+ * 未登录也允许访问部分页面
  */
 function checkLogin() {
     const user = localStorage.getItem('user');
@@ -190,20 +231,54 @@ function checkLogin() {
             // 老数据缺少id字段，需要重新登录
             localStorage.removeItem('user');
             currentUser = null;
-            document.getElementById('login-section').style.display = 'flex';
-            document.getElementById('main-app').style.display = 'none';
-            return;
+        } else if (isTokenExpired()) {
+            // Token已过期，清除登录状态
+            localStorage.removeItem('user');
+            currentUser = null;
         }
-        document.getElementById('login-section').style.display = 'none';
-        document.getElementById('main-app').style.display = 'block';
+    } else {
+        currentUser = null;
+    }
+    
+    // 无论是否登录都显示主应用界面
+    document.getElementById('login-section').style.display = 'none';
+    document.getElementById('main-app').style.display = 'block';
+    
+    // 更新导航栏显示
+    updateNavForLoginState();
+    
+    if (currentUser) {
         fetchCustomFields(); // Load custom fields schema
         fetchSystemSettings(); // Load system settings
         updateNavUser(); // Update nav user display
-        showSection('home');
-    } else {
-        document.getElementById('login-section').style.display = 'flex';
-        document.getElementById('main-app').style.display = 'none';
     }
+    
+    showSection('home');
+}
+
+/**
+ * 根据登录状态更新导航栏显示
+ */
+function updateNavForLoginState() {
+    const isLoggedIn = !!currentUser;
+    
+    // 需要登录才能看到的导航项
+    document.querySelectorAll('.nav-login-required').forEach(el => {
+        el.style.display = isLoggedIn ? '' : 'none';
+    });
+    
+    // 仅游客可见的导航项
+    document.querySelectorAll('.nav-guest-only').forEach(el => {
+        el.style.display = isLoggedIn ? 'none' : '';
+    });
+}
+
+/**
+ * 显示登录页面
+ */
+function showLoginPage() {
+    document.getElementById('main-app').style.display = 'none';
+    document.getElementById('login-section').style.display = 'flex';
 }
 
 /**
@@ -234,6 +309,12 @@ async function login() {
         
         if (res.ok) {
             const user = await res.json();
+            // 后端返回 expires_in（有效期秒数），前端计算本地过期时间戳
+            // 这样避免不同硬件时间纪元差异问题
+            if (user.expires_in) {
+                user.token_expire = Math.floor(Date.now() / 1000) + user.expires_in;
+                delete user.expires_in;  // 移除原字段，只保留计算后的时间戳
+            }
             localStorage.setItem('user', JSON.stringify(user));
             checkLogin();
         } else {
@@ -247,7 +328,80 @@ async function login() {
 function logout() {
     localStorage.removeItem('user');
     currentUser = null;
-    checkLogin();
+    updateNavForLoginState();
+    showSection('home'); // 退出后回到首页
+}
+
+/**
+ * 获取带Token的请求头（用于POST/PUT等请求）
+ * @param {object} extraHeaders - 额外的请求头
+ * @returns {object} 请求头对象
+ */
+function getAuthHeaders(extraHeaders = {}) {
+    const headers = { 'Content-Type': 'application/json', ...extraHeaders };
+    const token = getAuthToken();
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+    return headers;
+}
+
+/**
+ * 获取带Token的URL查询参数（用于GET请求）
+ * @param {object} extraParams - 额外的查询参数
+ * @returns {string} 查询字符串（包含?前缀）
+ */
+function getAuthQuery(extraParams = {}) {
+    const params = { ...extraParams };
+    const token = getAuthToken();
+    if (token) {
+        params.token = token;
+    }
+    const queryString = new URLSearchParams(params).toString();
+    return queryString ? `?${queryString}` : '';
+}
+
+/**
+ * 封装带认证的fetch请求
+ * 自动添加Token到请求头或URL参数
+ * @param {string} url - 请求URL
+ * @param {object} options - fetch选项
+ * @returns {Promise<Response>}
+ */
+async function fetchWithAuth(url, options = {}) {
+    const token = getAuthToken();
+    
+    // 如果没有登录或Token过期，某些请求需要拒绝
+    if (!token && options.requireAuth) {
+        throw new Error('请先登录');
+    }
+    
+    // 对于GET请求，Token加到URL参数
+    if (!options.method || options.method.toUpperCase() === 'GET') {
+        const separator = url.includes('?') ? '&' : '?';
+        if (token) {
+            url = `${url}${separator}token=${token}`;
+        }
+    } else {
+        // 对于POST等请求，Token加到Header
+        options.headers = options.headers || {};
+        options.headers['Content-Type'] = options.headers['Content-Type'] || 'application/json';
+        if (token) {
+            options.headers['Authorization'] = `Bearer ${token}`;
+        }
+    }
+    
+    const response = await fetch(url, options);
+    
+    // 如果返回401，可能是Token过期
+    if (response.status === 401 && currentUser) {
+        const data = await response.clone().json().catch(() => ({}));
+        if (data.error && data.error.includes('过期')) {
+            handleTokenExpired();
+        }
+    }
+    
+    return response;
 }
 
 // --- 修改密码 ---
@@ -287,20 +441,17 @@ async function saveProfile() {
     const alias = document.getElementById('profile-alias').value.trim();
     const birthday = document.getElementById('profile-birthday').value;
     
-    // 检查操作者身份
-    const operatorId = getOperatorId();
-    if(!operatorId) {
-        alert('操作失败：无法获取操作者身份，请重新登录后再试');
+    // 检查登录状态
+    if(!getAuthToken()) {
+        alert('操作失败：登录已过期，请重新登录后再试');
         return;
     }
     
     try {
-        const res = await fetch(`${API_BASE}/profile/update`, {
+        const res = await fetchWithAuth(`${API_BASE}/profile/update`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 id: currentUser.id,
-                operator_id: operatorId,
                 alias: alias,
                 birthday: birthday
             })
@@ -358,11 +509,11 @@ async function submitProfilePassword() {
         const res = await fetch(`${API_BASE}/members/change_password`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+            body: JSON.stringify(withToken({
                 id: currentUser.id,
                 old_password: oldPwd,
                 new_password: newPwd
-            })
+            }))
         });
         
         if (res.ok) {
@@ -392,7 +543,14 @@ let _lastSection = 'home';
  * 自动隐藏其他区块，并根据区块类型加载对应数据
  */
 function showSection(id) {
-    if(!currentUser) return; // Prevent navigation if not logged in
+    // 未登录用户只能访问特定页面
+    const guestAllowedSections = ['home', 'activities', 'poems', 'members'];
+    if (!currentUser && !guestAllowedSections.includes(id)) {
+        // 提示用户需要登录
+        alert('请先登录后再访问此功能');
+        showLoginPage();
+        return;
+    }
     
     // Track history (except for search results view)
     if (id !== 'search-results-section') {
@@ -408,7 +566,9 @@ function showSection(id) {
     if (searchContainer) {
         // Keep visible if in search-results-section so user can clear/edit
         const visibleSections = ['home', 'activities', 'poems', 'tasks', 'search-results-section'];
-        searchContainer.style.display = visibleSections.includes(id) ? 'block' : 'none';
+        // 未登录时搜索框只在允许的页面显示
+        const shouldShow = visibleSections.includes(id) && (currentUser || guestAllowedSections.includes(id));
+        searchContainer.style.display = shouldShow ? 'block' : 'none';
     }
     
     // Auto-fetch data based on section
@@ -751,7 +911,7 @@ async function publishPoem() {
         const res = await fetch(`${API_BASE}/poems`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(poemData)
+            body: JSON.stringify(withToken(poemData))
         });
         
         if(res.ok) {
@@ -779,10 +939,10 @@ async function submitPoemUpdate() {
        const res = await fetch(`${API_BASE}/poems/update`, {
            method: 'POST',
            headers: {'Content-Type': 'application/json'},
-           body: JSON.stringify({
+           body: JSON.stringify(withToken({
                id: editingPoemId,
                title, content, type, date
-           })
+           }))
        });
        if(res.ok) {
            alert('更新成功');
@@ -817,7 +977,7 @@ async function withdrawPoem() {
         const res = await fetch(`${API_BASE}/poems/delete`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({id: editingPoemId})
+            body: JSON.stringify(withToken({id: editingPoemId}))
         });
         
         if(res.ok) {
@@ -841,7 +1001,7 @@ async function deletePoemWrapper(id, isLocal) {
             const res = await fetch(`${API_BASE}/poems/delete`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({id: id})
+                body: JSON.stringify(withToken({id: id}))
             });
             if(res.ok) fetchPoems();
             else alert('删除失败');
@@ -922,6 +1082,41 @@ function formatRole(role) {
     return roleMap[role] || role || '社员';
 }
 
+/**
+ * 检查操作者是否可以管理目标成员
+ * 规则：不能管理权限比自己高或相同的用户（超管除外）
+ */
+function canManageMember(operatorRole, targetMemberRole) {
+    const operatorLevel = ROLE_LEVEL[operatorRole] ?? 3;
+    const targetLevel = ROLE_LEVEL[targetMemberRole] ?? 3;
+    
+    // 超级管理员可以管理所有用户
+    if (operatorRole === 'super_admin') return true;
+    
+    // 不能管理权限比自己高或相同的用户
+    return targetLevel > operatorLevel;
+}
+
+/**
+ * 获取当前用户可分配的角色列表
+ * 规则：只能分配比自己权限低的角色
+ */
+function getAssignableRoles(operatorRole) {
+    const operatorLevel = ROLE_LEVEL[operatorRole] ?? 3;
+    const allRoles = [
+        { value: 'admin', label: '管理员', level: 1 },
+        { value: 'director', label: '理事', level: 2 },
+        { value: 'finance', label: '财务', level: 2 },
+        { value: 'member', label: '社员', level: 3 }
+    ];
+    
+    // 超级管理员可以分配所有角色（除了超管）
+    if (operatorRole === 'super_admin') return allRoles;
+    
+    // 其他角色只能分配比自己权限低的角色
+    return allRoles.filter(r => r.level > operatorLevel);
+}
+
 // ============================================================================
 // 社员管理模块
 // ============================================================================
@@ -929,12 +1124,16 @@ function formatRole(role) {
 /**
  * 获取社员列表并渲染
  * 根据当前用户角色显示编辑/删除按钮
+ * 未登录用户只能看到雅号和围炉值
  */
 async function fetchMembers() {
     showLoading('member-list');
     
     try {
-        const res = await fetch(`${API_BASE}/members`);
+        // 未登录时使用 public 模式，只获取公开信息
+        const isLoggedIn = !!currentUser;
+        const url = isLoggedIn ? `${API_BASE}/members` : `${API_BASE}/members?public=1`;
+        const res = await fetch(url);
         if (!res.ok) throw new Error('Failed to fetch members');
         _cachedMembers = await res.json();
     } catch (e) {
@@ -944,16 +1143,39 @@ async function fetchMembers() {
     }
 
     const container = document.getElementById('member-list');
-    const canEdit = ['super_admin', 'admin', 'director'].includes(currentUser?.role);
+    const isLoggedIn = !!currentUser;
+    const canEdit = isLoggedIn && ['super_admin', 'admin', 'director'].includes(currentUser?.role);
     const canDelete = currentUser?.role === 'super_admin';
     
     if(_cachedMembers.length === 0) {
-        showEmptyState('member-list', '👥', '暂无社员，快来录入第一位社员吧！', '录入社员', 'openMemberModal()');
+        if (isLoggedIn) {
+            showEmptyState('member-list', '👥', '暂无社员，快来录入第一位社员吧！', '录入社员', 'openMemberModal()');
+        } else {
+            showEmptyState('member-list', '👥', '暂无社员');
+        }
         return;
     }
 
     container.innerHTML = _cachedMembers.map(m => {
-        const displayName = m.alias || m.name;
+        // 未登录时只显示雅号，登录后显示雅号或姓名
+        const displayName = m.alias || (isLoggedIn ? m.name : '社员');
+        // 检查当前用户是否有权限编辑此成员
+        const canEditThis = canEdit && canManageMember(currentUser?.role, m.role);
+        
+        if (!isLoggedIn) {
+            // 未登录用户只看到雅号和围炉值
+            return `
+            <div class="member-card">
+                <div class="member-avatar">${displayName.charAt(0)}</div>
+                <h4>${displayName}</h4>
+                <div style="margin: 10px 0;">
+                    <span class="points-badge">${m.points || 0} ${getPointsName()}</span>
+                </div>
+            </div>
+            `;
+        }
+        
+        // 登录用户看到完整信息
         return `
         <div class="member-card">
             <div class="member-avatar">${displayName.charAt(0)}</div>
@@ -967,7 +1189,9 @@ async function fetchMembers() {
             </div>
             ${(canEdit || canDelete) ? `
             <div class="member-actions">
-                ${canEdit ? `<button class="btn-edit" onclick="editMemberClick(${m.id})">编辑</button>` : ''}
+                ${canEdit ? (canEditThis 
+                    ? `<button class="btn-edit" onclick="editMemberClick(${m.id})">编辑</button>` 
+                    : `<button class="btn-edit" style="color:#aaa; border-color:#ccc; cursor:not-allowed;" disabled title="无权编辑此用户">编辑</button>`) : ''}
                 ${canDelete ? `<button class="btn-remove" onclick="deleteMember(${m.id})">移除</button>` : ''}
             </div>
             ` : ''}
@@ -978,6 +1202,10 @@ async function fetchMembers() {
 let editingMemberId = null;
 
 async function openMemberModal(member = null) {
+    // 动态设置可选角色（根据当前用户权限）
+    const roleSelect = document.getElementById('m-role');
+    const assignableRoles = getAssignableRoles(currentUser?.role);
+    
     if (member) {
         editingMemberId = member.id;
         document.querySelector('#modal-member h3').innerText = '编辑社员资料';
@@ -985,11 +1213,33 @@ async function openMemberModal(member = null) {
         document.getElementById('m-alias').value = member.alias || '';
         document.getElementById('m-phone').value = member.phone || '';
         document.getElementById('m-password').value = ''; // 编辑时不显示原密码 
-        document.getElementById('m-role').value = member.role || 'member';
         document.getElementById('m-points').value = member.points || 0;
         document.getElementById('m-birthday').value = member.birthday || '';
         // 编辑时密码非必填
         document.getElementById('m-password').placeholder = "留空则不修改密码";
+        
+        // 编辑时：如果目标用户角色比当前用户高或相同，角色不可修改
+        const canChangeRole = canManageMember(currentUser?.role, member.role);
+        if (canChangeRole) {
+            // 可以修改角色，但只能选择可分配的角色
+            roleSelect.innerHTML = assignableRoles.map(r => 
+                `<option value="${r.value}">${r.label}</option>`
+            ).join('');
+            // 如果当前角色在可选列表中，保持选中
+            if (assignableRoles.some(r => r.value === member.role)) {
+                roleSelect.value = member.role;
+            } else {
+                // 当前角色不在可选列表中（比如正在编辑一个权限更低的用户），添加当前角色作为选项
+                roleSelect.innerHTML = `<option value="${member.role}">${formatRole(member.role)}</option>` + roleSelect.innerHTML;
+                roleSelect.value = member.role;
+            }
+            roleSelect.disabled = false;
+        } else {
+            // 不能修改角色，显示当前角色但禁用
+            roleSelect.innerHTML = `<option value="${member.role}">${formatRole(member.role)}</option>`;
+            roleSelect.value = member.role;
+            roleSelect.disabled = true;
+        }
     } else {
         editingMemberId = null;
         document.querySelector('#modal-member h3').innerText = '录入新社员';
@@ -997,12 +1247,18 @@ async function openMemberModal(member = null) {
         document.getElementById('m-alias').value = '';
         document.getElementById('m-phone').value = '';
         document.getElementById('m-password').value = '';
-        document.getElementById('m-role').value = 'member';
         document.getElementById('m-points').value = '';
         document.getElementById('m-birthday').value = '';
         // 新建时密码必填
         document.getElementById('m-password').placeholder = "初始密码 *";
         document.getElementById('m-points').placeholder = `初始${getPointsName()} (默认0)`;
+        
+        // 新建时：只能选择可分配的角色
+        roleSelect.innerHTML = assignableRoles.map(r => 
+            `<option value="${r.value}">${r.label}</option>`
+        ).join('');
+        roleSelect.value = 'member'; // 默认选择社员
+        roleSelect.disabled = false;
     }
 
     // Render Custom Fields
@@ -1067,7 +1323,7 @@ async function submitMember() {
             const response = await fetch(`${API_BASE}/members`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(withOperator(data))
+                body: JSON.stringify(withToken(data))
             });
             if (!response.ok) {
                 const err = await response.json().catch(() => ({}));
@@ -1079,7 +1335,7 @@ async function submitMember() {
             const response = await fetch(`${API_BASE}/members/update`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(withOperator(data))
+                body: JSON.stringify(withToken(data))
             });
             if (!response.ok) {
                 const err = await response.json().catch(() => ({}));
@@ -1114,7 +1370,7 @@ async function deleteMember(id) {
         const res = await fetch(`${API_BASE}/members/delete`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(withOperator({id: id}))
+            body: JSON.stringify(withToken({id: id}))
         });
         if(res.ok) {
             alert('社员已移除');
@@ -1137,21 +1393,26 @@ async function fetchFinance() {
         addFinanceBtn.style.display = canRecord ? 'inline-block' : 'none';
     }
     
-    const res = await fetch(`${API_BASE}/finance`);
-    const records = await res.json();
-    
-    let income = 0, expense = 0;
-    records.forEach(r => {
-        if(r.type === 'income') income += r.amount;
-        else expense += r.amount;
-    });
-    
-    document.getElementById('total-income').innerText = income.toLocaleString();
-    document.getElementById('total-expense').innerText = expense.toLocaleString();
-    document.getElementById('balance').innerText = (income - expense).toLocaleString();
-    
-    const tbody = document.getElementById('finance-list');
-    tbody.innerHTML = records.map(r => `
+    try {
+        const res = await fetchWithAuth(`${API_BASE}/finance`);
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || '获取失败');
+        }
+        const records = await res.json();
+        
+        let income = 0, expense = 0;
+        records.forEach(r => {
+            if(r.type === 'income') income += r.amount;
+            else expense += r.amount;
+        });
+        
+        document.getElementById('total-income').innerText = income.toLocaleString();
+        document.getElementById('total-expense').innerText = expense.toLocaleString();
+        document.getElementById('balance').innerText = (income - expense).toLocaleString();
+        
+        const tbody = document.getElementById('finance-list');
+        tbody.innerHTML = records.map(r => `
         <tr>
             <td>${r.date}</td>
             <td>${r.summary}<br><small>${r.category}</small></td>
@@ -1161,6 +1422,10 @@ async function fetchFinance() {
             <td>${r.handler}</td>
         </tr>
     `).join('');
+    } catch(e) {
+        console.error('获取财务记录失败:', e);
+        alert('获取财务记录失败: ' + e.message);
+    }
 }
 
 // ============================================================================
@@ -1193,7 +1458,11 @@ async function fetchTasks() {
     showLoading('task-list');
     
     try {
-        const res = await fetch(`${API_BASE}/tasks`);
+        const res = await fetchWithAuth(`${API_BASE}/tasks`);
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || '获取失败');
+        }
         const tasks = await res.json();
         _cachedTasks = tasks;
 
@@ -1330,7 +1599,7 @@ async function submitTask() {
         const res = await fetch(`${API_BASE}/tasks`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
+            body: JSON.stringify(withToken({
                 title,
                 description,
                 reward,
@@ -1338,7 +1607,7 @@ async function submitTask() {
                 creator_id: currentUser.id,  // 存储创建者ID用于动态查找
                 assignee: assignee || null,
                 assignee_id: assigneeId  // 存储领取者ID用于动态查找
-            })
+            }))
         });
         
         if(res.ok) {
@@ -1365,7 +1634,7 @@ async function claimTask(taskId) {
         const res = await fetch(`${API_BASE}/tasks/claim`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ task_id: taskId, member_name: currentUser.name, member_id: currentUser.id })
+            body: JSON.stringify(withToken({ task_id: taskId, member_name: currentUser.name, member_id: currentUser.id }))
         });
         
         if(res.ok) {
@@ -1387,7 +1656,7 @@ async function unclaimTask(taskId) {
         const res = await fetch(`${API_BASE}/tasks/unclaim`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ task_id: taskId })
+            body: JSON.stringify(withToken({ task_id: taskId }))
         });
         
         if(res.ok) {
@@ -1409,7 +1678,7 @@ async function submitTaskComplete(taskId) {
         const res = await fetch(`${API_BASE}/tasks/submit`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ task_id: taskId })
+            body: JSON.stringify(withToken({ task_id: taskId }))
         });
         
         if(res.ok) {
@@ -1431,7 +1700,7 @@ async function approveTask(taskId) {
         const res = await fetch(`${API_BASE}/tasks/approve`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ task_id: taskId })
+            body: JSON.stringify(withToken({ task_id: taskId }))
         });
         
         if(res.ok) {
@@ -1466,7 +1735,7 @@ async function forceApproveTask(taskId) {
         const res = await fetch(`${API_BASE}/tasks/approve`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ task_id: taskId, force: true })
+            body: JSON.stringify(withToken({ task_id: taskId, force: true }))
         });
         
         if(res.ok) {
@@ -1494,7 +1763,7 @@ async function rejectTask(taskId) {
         const res = await fetch(`${API_BASE}/tasks/reject`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ task_id: taskId })
+            body: JSON.stringify(withToken({ task_id: taskId }))
         });
         
         if(res.ok) {
@@ -1516,7 +1785,7 @@ async function deleteTask(taskId) {
         const res = await fetch(`${API_BASE}/tasks/delete`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ task_id: taskId })
+            body: JSON.stringify(withToken({ task_id: taskId }))
         });
         
         if(res.ok) {
@@ -1541,7 +1810,7 @@ async function completeTask(taskId) {
         const res = await fetch(`${API_BASE}/tasks/complete`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ task_id: taskId, member_name: memberName })
+            body: JSON.stringify(withToken({ task_id: taskId, member_name: memberName }))
         });
         
         if(res.ok) {
@@ -1693,7 +1962,7 @@ async function deleteActivity(id) {
     await fetch(`${API_BASE}/activities/delete`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({id})
+        body: JSON.stringify(withToken({id}))
     });
     fetchActivities();
     loadSystemInfo(); // Refresh Home list too
@@ -1778,7 +2047,7 @@ async function submitFinance() {
         const response = await fetch(`${API_BASE}/finance`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(withOperator(data))
+            body: JSON.stringify(withToken(data))
         });
 
         if (!response.ok) throw new Error(`Server Error: ${response.status}`);
@@ -1872,11 +2141,14 @@ async function deleteActivityInView(id) {
 }
 
 async function loadSystemInfo() {
+    // 未登录用户不加载系统信息
+    if (!currentUser) return;
+    
     // 确保成员缓存已加载（用于首页显示诗作作者）
     await ensureMembersCached();
     
     try {
-        const res = await fetch(`${API_BASE}/system/info`);
+        const res = await fetchWithAuth(`${API_BASE}/system/info`);
         const info = await res.json();
         
         // Convert bytes to KB
@@ -1970,6 +2242,19 @@ async function loadSystemInfo() {
                 
                 wifiTextEl.innerText = `${ssid} (${rssi}dBm ${signalText})`;
                 wifiBarEl.style.width = `${percent}%`;
+            }
+            
+            // 更新WiFi模式指示（编号颜色）
+            // 使用独立的激活状态，支持同时显示两种模式
+            const staBadge = document.getElementById('wifi-mode-sta-badge');
+            const apBadge = document.getElementById('wifi-mode-ap-badge');
+            if (staBadge && apBadge) {
+                const activeColor = 'var(--accent)';
+                const inactiveColor = '#6c757d';
+                // STA模式：已连接时显示绿色
+                staBadge.style.background = info.sta_active ? activeColor : inactiveColor;
+                // AP模式：已激活时显示绿色
+                apBadge.style.background = info.ap_active ? activeColor : inactiveColor;
             }
         }
             
@@ -2150,11 +2435,11 @@ async function handleGlobalSearch(term) {
 
     try {
         // SERVER SIDE SEARCH for Scalability
-        const [poems, activities, tasks] = await Promise.all([
+        const [poems, activities, tasksRes] = await Promise.all([
             fetch(`${API_BASE}/poems?limit=20&q=${encodeURIComponent(term)}`).then(r=>r.json()).catch(()=>[]),
             fetch(`${API_BASE}/activities?limit=20&q=${encodeURIComponent(term)}`).then(r=>r.json()).catch(()=>[]),
-            // Tasks remains client side or simple fetch for now if small
-            fetch(`${API_BASE}/tasks`).then(r=>r.json()).catch(()=>[])
+            // Tasks 也使用服务端搜索
+            fetch(`${API_BASE}/tasks?page=1&limit=20&q=${encodeURIComponent(term)}`).then(r=>r.json()).catch(()=>({data:[]}))
         ]);
         
         // Race Condition Check: If a newer request has started, ignore this result
@@ -2162,11 +2447,8 @@ async function handleGlobalSearch(term) {
         
         _searchCache = { poems, activities };
 
-        // Filter tasks locally (assuming it returns all)
-        const matchedTasks = tasks.filter(task => 
-            (task.title && task.title.toLowerCase().includes(t)) || 
-            (task.description && task.description.toLowerCase().includes(t))
-        );
+        // Tasks 从分页响应中提取数据
+        const matchedTasks = tasksRes.data || tasksRes || [];
 
         // Render Results
         let html = '';
@@ -2258,11 +2540,26 @@ async function fetchCustomFields() {
 // --- 系统设置管理 ---
 async function fetchSystemSettings() {
     try {
+        // 获取公开设置（系统名称、积分名称）
         const res = await fetch(`${API_BASE}/settings/system`);
         if(res.ok) {
             _systemSettings = await res.json();
             // 更新网页标题
             document.title = _systemSettings.system_name || '围炉诗社·理事台';
+        }
+        
+        // 管理员额外获取salt和登录有效期（需要鉴权）
+        if(currentUser && (currentUser.role === 'super_admin' || currentUser.role === 'admin')) {
+            const saltRes = await fetchWithAuth(`${API_BASE}/settings/salt`);
+            if(saltRes.ok) {
+                const saltData = await saltRes.json();
+                _systemSettings.password_salt = saltData.password_salt;
+            }
+            const tokenExpireRes = await fetchWithAuth(`${API_BASE}/settings/token_expire`);
+            if(tokenExpireRes.ok) {
+                const expireData = await tokenExpireRes.json();
+                _systemSettings.token_expire_days = expireData.token_expire_days;
+            }
         }
     } catch(e) { console.error('Failed to load system settings', e); }
 }
@@ -2271,9 +2568,13 @@ function loadSystemSettingsUI() {
     const systemNameInput = document.getElementById('setting-system-name');
     const saltInput = document.getElementById('setting-password-salt');
     const pointsInput = document.getElementById('setting-points-name');
+    const tokenExpireInput = document.getElementById('setting-token-expire-days');
     if(systemNameInput) systemNameInput.value = _systemSettings.system_name || '围炉诗社·理事台';
-    if(saltInput) saltInput.value = _systemSettings.password_salt || 'weilu2018';
+    // salt 只有管理员能获取，非管理员显示占位符
+    if(saltInput) saltInput.value = _systemSettings.password_salt || '(需管理员权限查看)';
     if(pointsInput) pointsInput.value = _systemSettings.points_name || '围炉值';
+    // 登录有效期只有管理员能获取
+    if(tokenExpireInput) tokenExpireInput.value = _systemSettings.token_expire_days || 30;
 }
 
 async function saveSystemName() {
@@ -2285,7 +2586,7 @@ async function saveSystemName() {
         const res = await fetch(`${API_BASE}/settings/system`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(withOperator({ system_name: value }))
+            body: JSON.stringify(withToken({ system_name: value }))
         });
         if(res.ok) {
             _systemSettings.system_name = value;
@@ -2306,7 +2607,7 @@ async function savePointsName() {
         const res = await fetch(`${API_BASE}/settings/system`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(withOperator({ points_name: value }))
+            body: JSON.stringify(withToken({ points_name: value }))
         });
         if(res.ok) {
             _systemSettings.points_name = value;
@@ -2330,17 +2631,44 @@ async function savePasswordSalt() {
     const value = input.value.trim();
     if(!value) { alert('Salt不能为空'); return; }
     
-    if(!confirm('修改Salt后，所有现有密码将失效，需要重新执行密码迁移！确定要修改吗？')) return;
+    if(!confirm('修改Salt后，所有现有密码将失效，用户需要重置密码！确定要修改吗？')) return;
     
     try {
-        const res = await fetch(`${API_BASE}/settings/system`, {
+        const res = await fetchWithAuth(`${API_BASE}/settings/salt`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(withOperator({ password_salt: value }))
+            body: JSON.stringify({ password_salt: value })
         });
         if(res.ok) {
             _systemSettings.password_salt = value;
-            alert('Salt已更新，请立即执行密码迁移！');
+            alert('Salt已更新！所有用户需要重置密码。');
+        } else {
+            const err = await res.json().catch(() => ({}));
+            alert('保存失败: ' + (err.error || '权限不足'));
+        }
+    } catch(e) {
+        console.error(e);
+        alert('网络错误');
+    }
+}
+
+async function saveTokenExpireDays() {
+    const input = document.getElementById('setting-token-expire-days');
+    const value = parseInt(input.value);
+    if(isNaN(value) || value < 1 || value > 365) {
+        alert('登录有效期必须在1-365天之间');
+        return;
+    }
+    
+    try {
+        const res = await fetchWithAuth(`${API_BASE}/settings/token_expire`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ token_expire_days: value })
+        });
+        if(res.ok) {
+            _systemSettings.token_expire_days = value;
+            alert('登录有效期已更新为 ' + value + ' 天');
         } else {
             const err = await res.json().catch(() => ({}));
             alert('保存失败: ' + (err.error || '权限不足'));
@@ -2385,7 +2713,7 @@ async function saveCustomFields(fields) {
          const res = await fetch(`${API_BASE}/settings/fields`, {
              method: 'POST',
              headers: {'Content-Type': 'application/json'},
-             body: JSON.stringify(withOperator({fields: fields}))
+             body: JSON.stringify(withToken({fields: fields}))
          });
          if(res.ok) {
              _customFields = fields;
@@ -2435,7 +2763,7 @@ function renderAdminSettings() {
 // --- 数据统计 ---
 async function loadDataStats() {
     try {
-        const res = await fetch(`${API_BASE}/system/stats`);
+        const res = await fetchWithAuth(`${API_BASE}/system/stats`);
         if(res.ok) {
             const stats = await res.json();
             document.getElementById('stat-members').innerText = stats.members || 0;
@@ -2455,7 +2783,7 @@ async function fetchLoginLogs() {
     if(!container) return;
     
     try {
-        const res = await fetch(`${API_BASE}/login_logs`);
+        const res = await fetchWithAuth(`${API_BASE}/login_logs`);
         if(!res.ok) throw new Error('Failed');
         const logs = await res.json();
         
@@ -2482,30 +2810,6 @@ async function fetchLoginLogs() {
     }
 }
 
-// --- 密码迁移 ---
-async function migratePasswords() {
-    if(!confirm('确定要将所有明文密码迁移为哈希存储吗？此操作不可逆。')) return;
-    
-    try {
-        const res = await fetch(`${API_BASE}/migrate_passwords`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({operator_id: getOperatorId()})
-        });
-        
-        if(res.ok) {
-            const result = await res.json();
-            alert(`密码迁移完成！共迁移 ${result.migrated} 个账户。`);
-        } else {
-            const err = await res.json().catch(() => ({}));
-            alert('迁移失败: ' + (err.error || '权限不足'));
-        }
-    } catch(e) {
-        console.error(e);
-        alert('网络错误');
-    }
-}
-
 // --- WiFi 配置 ---
 function toggleStaticIpFields() {
     const staticRadio = document.querySelector('input[name="wifi-ip-mode"][value="static"]');
@@ -2517,7 +2821,7 @@ function toggleStaticIpFields() {
 
 async function loadWifiConfig() {
     try {
-        const res = await fetch(`${API_BASE}/wifi/config`);
+        const res = await fetchWithAuth(`${API_BASE}/wifi/config`);
         if(!res.ok) throw new Error('加载失败');
         const config = await res.json();
         
@@ -2590,7 +2894,7 @@ async function saveWifiConfig() {
         const res = await fetch(`${API_BASE}/wifi/config`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(withOperator(config))
+            body: JSON.stringify(withToken(config))
         });
         
         if(res.ok) {
@@ -2606,22 +2910,125 @@ async function saveWifiConfig() {
 }
 
 // --- 数据备份 ---
+// 备份表名称映射（用于显示）
+const BACKUP_TABLE_NAMES = {
+    'members': '成员数据',
+    'poems': '诗词作品',
+    'activities': '活动记录',
+    'tasks': '事务任务',
+    'finance': '财务记录',
+    'points_logs': '积分日志',
+    'login_logs': '登录日志',
+    'settings': '系统设置',
+    'wifi_config': 'WiFi配置',
+    'system_config': '系统配置'
+};
+
+// 备份进度条控制
+function showBackupProgress(title) {
+    document.getElementById('backup-progress-title').innerText = title;
+    document.getElementById('backup-progress-status').innerText = '准备中...';
+    document.getElementById('backup-progress-percent').innerText = '0%';
+    document.getElementById('backup-progress-bar').style.width = '0%';
+    document.getElementById('backup-progress-detail').innerText = '正在初始化...';
+    document.getElementById('modal-backup-progress').style.display = 'flex';
+}
+
+function updateBackupProgress(percent, status, detail) {
+    document.getElementById('backup-progress-percent').innerText = `${percent}%`;
+    document.getElementById('backup-progress-bar').style.width = `${percent}%`;
+    if (status) document.getElementById('backup-progress-status').innerText = status;
+    if (detail) document.getElementById('backup-progress-detail').innerText = detail;
+}
+
+function hideBackupProgress() {
+    document.getElementById('modal-backup-progress').style.display = 'none';
+}
+
 async function exportBackup() {
-    // 检查操作者身份
-    const operatorId = getOperatorId();
-    if(!operatorId) {
-        alert('操作失败：无法获取操作者身份，请重新登录后再试');
+    // 检查登录状态
+    if(!getAuthToken()) {
+        alert('操作失败：登录已过期，请重新登录后再试');
         return;
     }
     
+    // 定义要导出的表（按顺序）
+    const tables = ['members', 'poems', 'activities', 'tasks', 'finance', 'points_logs', 'login_logs', 'settings', 'wifi_config', 'system_config'];
+    const totalTables = tables.length;
+    
+    showBackupProgress('正在导出数据...');
+    
     try {
-        const res = await fetch(`${API_BASE}/backup/export?operator_id=${operatorId}`);
-        if(!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || '导出请求失败');
-        }
-        const backup = await res.json();
+        const backupData = {
+            version: "1.0",
+            export_time: new Date().toISOString(),
+            data: {}
+        };
         
+        for (let i = 0; i < tables.length; i++) {
+            const table = tables[i];
+            const tableName = BACKUP_TABLE_NAMES[table] || table;
+            
+            try {
+                // 分批导出：循环请求直到所有数据获取完毕
+                let allData = [];
+                let page = 1;
+                let hasMore = true;
+                let total = 0;
+                
+                while (hasMore) {
+                    const basePercent = (i / totalTables) * 100;
+                    updateBackupProgress(
+                        Math.round(basePercent), 
+                        `导出 ${tableName}`, 
+                        total > 0 ? `已获取 ${allData.length}/${total} 条...` : `正在获取第 ${page} 批...`
+                    );
+                    
+                    const res = await fetchWithAuth(`${API_BASE}/backup/export-table?name=${table}&page=${page}&limit=100`);
+                    if (!res.ok) {
+                        const err = await res.json().catch(() => ({}));
+                        throw new Error(err.error || `导出 ${tableName} 失败`);
+                    }
+                    const result = await res.json();
+                    
+                    // 处理数据
+                    if (Array.isArray(result.data)) {
+                        allData = allData.concat(result.data);
+                    } else {
+                        // 配置类数据（非数组），直接使用
+                        allData = result.data;
+                        hasMore = false;
+                        break;
+                    }
+                    
+                    total = result.total || 0;
+                    hasMore = result.hasMore || false;
+                    page++;
+                    
+                    // 短暂延迟，让ESP32有时间处理
+                    if (hasMore) {
+                        await new Promise(r => setTimeout(r, 50));
+                    }
+                }
+                
+                backupData.data[table] = allData;
+                
+                const percent = Math.round(((i + 1) / totalTables) * 100);
+                updateBackupProgress(percent, `导出 ${tableName}`, Array.isArray(allData) ? `完成，共 ${allData.length} 条` : '完成');
+                
+            } catch (tableErr) {
+                console.warn(`导出 ${table} 失败:`, tableErr);
+                // 继续处理其他表，但记录错误
+                backupData.data[table] = [];
+            }
+            
+            // 表与表之间短暂延迟
+            await new Promise(r => setTimeout(r, 100));
+        }
+        
+        updateBackupProgress(100, '正在生成文件', '准备下载...');
+        
+        // 生成下载文件
         const now = new Date();
         const timestamp = now.getFullYear() + 
             String(now.getMonth() + 1).padStart(2, '0') + 
@@ -2630,7 +3037,7 @@ async function exportBackup() {
             String(now.getMinutes()).padStart(2, '0');
         const filename = `backup_${timestamp}.json`;
         
-        const blob = new Blob([JSON.stringify(backup, null, 2)], {type: 'application/json'});
+        const blob = new Blob([JSON.stringify(backupData, null, 2)], {type: 'application/json'});
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -2640,8 +3047,10 @@ async function exportBackup() {
         URL.revokeObjectURL(url);
         document.body.removeChild(a);
         
-        alert('备份导出成功');
+        hideBackupProgress();
+        alert('备份导出成功！');
     } catch(e) {
+        hideBackupProgress();
         console.error(e);
         alert('导出失败: ' + e.message);
     }
@@ -2655,10 +3064,9 @@ async function importBackup(event) {
     const file = event.target.files[0];
     if(!file) return;
     
-    // 检查操作者身份
-    const operatorId = getOperatorId();
-    if(!operatorId) {
-        alert('操作失败：无法获取操作者身份，请重新登录后再试');
+    // 检查登录状态
+    if(!getAuthToken()) {
+        alert('操作失败：登录已过期，请重新登录后再试');
         document.getElementById('backup-file-input').value = '';
         return;
     }
@@ -2668,7 +3076,11 @@ async function importBackup(event) {
         return;
     }
     
+    showBackupProgress('正在导入数据...');
+    
     try {
+        updateBackupProgress(5, '读取文件', '正在解析备份文件...');
+        
         const text = await file.text();
         let backup;
         try {
@@ -2681,21 +3093,103 @@ async function importBackup(event) {
             throw new Error('备份文件结构不完整');
         }
         
-        // 通过URL参数传递操作者身份（避免大JSON解析问题）
-        const res = await fetch(`${API_BASE}/backup/import?operator_id=${operatorId}`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(backup)
-        });
+        updateBackupProgress(10, '验证完成', '开始分表导入...');
         
-        if(res.ok) {
-            alert('数据恢复成功，页面将刷新');
-            location.reload();
-        } else {
-            const err = await res.json();
-            throw new Error(err.error || '权限不足');
+        // 定义要导入的表（按顺序，成员表优先）
+        const tables = ['members', 'poems', 'activities', 'tasks', 'finance', 'points_logs', 'login_logs', 'settings', 'wifi_config', 'system_config'];
+        const availableTables = tables.filter(t => backup.data[t] !== undefined);
+        const totalTables = availableTables.length;
+        
+        if (totalTables === 0) {
+            throw new Error('备份文件中没有可导入的数据');
         }
+        
+        let successCount = 0;
+        let errorTables = [];
+        
+        for (let i = 0; i < availableTables.length; i++) {
+            const table = availableTables[i];
+            const tableName = BACKUP_TABLE_NAMES[table] || table;
+            const percent = Math.round(10 + ((i + 1) / totalTables) * 85);
+            
+            updateBackupProgress(percent, `导入 ${tableName}`, `正在处理第 ${i + 1}/${totalTables} 项...`);
+            
+            try {
+                const tableData = backup.data[table];
+                
+                // 对于大型数组数据，分批发送（每批最多100条记录）
+                if (Array.isArray(tableData) && tableData.length > 100) {
+                    const batchSize = 100;
+                    const totalBatches = Math.ceil(tableData.length / batchSize);
+                    
+                    for (let batch = 0; batch < totalBatches; batch++) {
+                        const start = batch * batchSize;
+                        const end = Math.min(start + batchSize, tableData.length);
+                        const batchData = tableData.slice(start, end);
+                        
+                        updateBackupProgress(percent, `导入 ${tableName}`, `批次 ${batch + 1}/${totalBatches} (${start + 1}-${end}/${tableData.length})`);
+                        
+                        const res = await fetchWithAuth(`${API_BASE}/backup/import-table?name=${table}&mode=${batch === 0 ? 'overwrite' : 'append'}`, {
+                            method: 'POST',
+                            body: JSON.stringify({ data: batchData })
+                        });
+                        
+                        if (!res.ok) {
+                            const errText = await res.text();
+                            console.error(`导入 ${table} 批次${batch + 1} HTTP错误: 状态=${res.status}, 响应=${errText}`);
+                            let errMsg = `HTTP ${res.status}`;
+                            try {
+                                const errJson = JSON.parse(errText);
+                                errMsg = errJson.error || errMsg;
+                            } catch(e) {}
+                            throw new Error(errMsg);
+                        }
+                        
+                        // 批次间延迟，让ESP32释放内存
+                        await new Promise(r => setTimeout(r, 300));
+                    }
+                } else {
+                    // 小数据直接发送
+                    const res = await fetchWithAuth(`${API_BASE}/backup/import-table?name=${table}`, {
+                        method: 'POST',
+                        body: JSON.stringify({ data: tableData })
+                    });
+                    
+                    if (!res.ok) {
+                        const errText = await res.text();
+                        console.error(`导入 ${table} HTTP错误: 状态=${res.status}, 响应=${errText}`);
+                        let errMsg = `HTTP ${res.status}`;
+                        try {
+                            const errJson = JSON.parse(errText);
+                            errMsg = errJson.error || errMsg;
+                        } catch(e) {}
+                        throw new Error(errMsg);
+                    }
+                }
+                
+                successCount++;
+            } catch (tableErr) {
+                console.error(`导入 ${table} 失败:`, tableErr);
+                errorTables.push(tableName);
+            }
+            
+            // 延迟500ms，让ESP32有时间处理和释放内存
+            await new Promise(r => setTimeout(r, 500));
+        }
+        
+        updateBackupProgress(100, '导入完成', '正在刷新页面...');
+        
+        hideBackupProgress();
+        
+        if (errorTables.length > 0) {
+            alert(`数据导入完成，但以下项目导入失败：\n${errorTables.join('、')}\n\n成功导入 ${successCount}/${totalTables} 项\n\n页面将刷新`);
+        } else {
+            alert(`数据恢复成功！共导入 ${successCount} 项数据\n\n页面将刷新`);
+        }
+        
+        location.reload();
     } catch(e) {
+        hideBackupProgress();
         console.error(e);
         alert('导入失败: ' + e.message);
     }
