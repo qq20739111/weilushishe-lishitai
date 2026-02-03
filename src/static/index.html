@@ -7,8 +7,18 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+    <!-- 维护模式页面 -->
+    <section id="maintenance-section" class="hidden" style="height: 100vh; justify-content: center; align-items: center; background: var(--bg);">
+        <div class="card" style="width: 100%; max-width: 400px; text-align: center; padding: 40px 30px;">
+            <div style="font-size: 64px; margin-bottom: 20px;">🔧</div>
+            <h2 style="margin: 0 0 15px 0; color: var(--text);">系统维护中</h2>
+            <p style="color: #666; margin-bottom: 30px; line-height: 1.6;">网站正在进行升级维护，请稍后再访问。给您带来不便，敬请谅解。</p>
+            <button onclick="showMaintenanceLogin()" style="width: 100%; background: var(--accent);">管理员登录</button>
+        </div>
+    </section>
+
     <!-- Login Section (默认隐藏) -->
-    <section id="login-section" style="display:none; height: 100vh; justify-content: center; align-items: center; background: var(--bg);">
+    <section id="login-section" class="hidden" style="height: 100vh; justify-content: center; align-items: center; background: var(--bg);">
         <div class="card" style="width: 100%; max-width: 400px; text-align: center;">
             <div style="margin-bottom: 20px;">
                 <img src="/static/logo.png" alt="Logo" style="height: 80px;">
@@ -20,7 +30,7 @@
     </section>
 
     <!-- Main Content (Hidden by default) -->
-    <div id="main-app" style="display: none;">
+    <div id="main-app" class="hidden">
         <nav class="navbar">
             <div class="container nav-container">
                 <a href="#" class="brand" onclick="showSection('home')">
@@ -29,6 +39,7 @@
                 <button class="menu-toggle" onclick="toggleMobileMenu()">☰</button>
                 <div class="nav-links" id="nav-links">
                     <a href="#" onclick="showSection('activities'); closeMobileMenu();">活动</a>
+                    <a href="#" onclick="showSection('chat'); closeMobileMenu();">摆龙门阵</a>
                     <a href="#" onclick="showSection('poems'); closeMobileMenu();">藏诗阁</a>
                     <a href="#" onclick="showSection('tasks'); closeMobileMenu();" class="nav-login-required">事务</a>
                     <a href="#" onclick="showSection('finance'); closeMobileMenu();" class="nav-login-required">财务</a>
@@ -49,7 +60,7 @@
         </div>
 
         <!-- Search Results Section (Hidden by default) -->
-        <section id="search-results-section" style="display:none;">
+        <section id="search-results-section" class="hidden">
             <h3>搜索结果</h3>
             <div id="search-results-container"></div>
         </section>
@@ -74,15 +85,69 @@
                 </div>
             </div>
 
-            <!-- 第二行：今日推荐 -->
-            <div class="card" style="margin-top: 20px;">
-                <h3>今日推荐</h3>
-                <div id="daily-poem">加载中...</div>
+            <!-- 第二行：今日推荐 + 摆龙门阵（PC端并排，移动端堆叠） -->
+            <div class="home-row-2">
+                <div class="card home-daily-card">
+                    <h3>今日推荐</h3>
+                    <div id="daily-poem">加载中...</div>
+                </div>
+                <div class="card home-chat-card">
+                    <h3>摆龙门阵 <span id="home-chat-user-count" style="font-size:0.8em; color:#888;"></span></h3>
+                    <div id="home-chat-preview" class="home-card-content home-chat-messages">
+                        <div class="empty-hint">暂无消息，快来说点什么吧</div>
+                    </div>
+                    <div class="home-chat-input-area">
+                        <div style="display:flex; gap:8px; align-items:flex-end;">
+                            <textarea id="home-chat-input" placeholder="输入消息..." maxlength="256" rows="1" style="flex:1; margin:0; padding:8px 12px; resize:none; font-family:inherit; font-size:inherit;" oninput="updateHomeChatSendBtn()" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendHomeChatMessage();}"></textarea>
+                            <button id="home-chat-send-btn" onclick="sendHomeChatMessage()" disabled style="padding:8px 16px; margin:0;">发送</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Chat Section -->
+        <section id="chat" class="hidden">
+            <h2>摆龙门阵</h2>
+            <div class="chat-container">
+                <div class="chat-main">
+                    <div class="card chat-messages-card">
+                        <div id="chat-messages" class="chat-messages-list">
+                            <div class="empty-hint">暂无消息，快来说点什么吧！</div>
+                        </div>
+                        <div class="chat-input-area">
+                            <div class="chat-input-wrapper">
+                                <textarea id="chat-input" placeholder="输入消息（最多256字）" maxlength="256" rows="2" oninput="updateChatSendBtn()"></textarea>
+                                <div class="chat-input-info">
+                                    <span id="chat-char-count">0/256</span>
+                                    <button id="chat-send-btn" onclick="sendChatMessage()" disabled>发送</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="chat-sidebar">
+                    <div class="card">
+                        <h4>在线用户 <span id="chat-online-count">(0)</span></h4>
+                        <div id="chat-user-list" class="chat-user-list">
+                            <div class="empty-hint">暂无用户</div>
+                        </div>
+                    </div>
+                    <div class="card" style="margin-top:15px;">
+                        <h4>龙门阵状态</h4>
+                        <div id="chat-status-info" style="font-size:0.85em; color:#666;">
+                            <div>内存使用: <span id="chat-memory-usage">-</span></div>
+                            <div>消息数量: <span id="chat-msg-count">-</span></div>
+                            <div>游客上限: <span id="chat-guest-slots">-</span></div>
+                            <div>聊天上限: <span id="chat-max-users">-</span></div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </section>
 
         <!-- Admin Section -->
-        <section id="admin" style="display:none;">
+        <section id="admin" class="hidden">
             <h2>后台管理仪表盘</h2>
             <div class="card">
                 <h3>设备状态</h3>
@@ -242,19 +307,89 @@
             </div>
 
             <div class="card director-only-card" style="margin-top:20px;">
-                <h3>系统设置</h3>
-                <div style="margin-bottom:15px;">
-                    <label style="display:block; font-size:0.85em; color:#666; margin-bottom:6px;">系统名称</label>
-                    <div class="admin-field-row">
-                        <input type="text" id="setting-system-name" placeholder="围炉诗社·理事台" style="flex:1;">
-                        <button onclick="saveSystemName()">保存</button>
+                <h3>系统基础设置</h3>
+                
+                <!-- 基础信息分组 -->
+                <div class="settings-group">
+                    <div class="settings-group-title">基础信息</div>
+                    <div style="margin-bottom:15px;">
+                        <label style="display:block; font-size:0.85em; color:#666; margin-bottom:6px;">系统名称</label>
+                        <div class="admin-field-row">
+                            <input type="text" id="setting-system-name" placeholder="围炉诗社·理事台" style="flex:1;">
+                            <button onclick="saveSystemName()">保存</button>
+                        </div>
+                    </div>
+                    <div>
+                        <label style="display:block; font-size:0.85em; color:#666; margin-bottom:6px;">积分名称</label>
+                        <div class="admin-field-row">
+                            <input type="text" id="setting-points-name" placeholder="围炉值" style="flex:1;">
+                            <button onclick="savePointsName()">保存</button>
+                        </div>
                     </div>
                 </div>
-                <div style="margin-bottom:15px;">
-                    <label style="display:block; font-size:0.85em; color:#666; margin-bottom:6px;">积分名称</label>
-                    <div class="admin-field-row">
-                        <input type="text" id="setting-points-name" placeholder="围炉值" style="flex:1;">
-                        <button onclick="savePointsName()">保存</button>
+                
+                <!-- 功能开关分组 -->
+                <div class="settings-group">
+                    <div class="settings-group-title">功能开关</div>
+                    
+                    <div class="switch-row">
+                        <div class="switch-info">
+                            <div class="switch-title">全站维护模式</div>
+                            <div class="switch-desc">开启后仅管理员可访问，其他用户显示维护提示</div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="setting-maintenance-mode" onchange="saveSiteSettings()">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    
+                    <div class="switch-row">
+                        <div class="switch-info">
+                            <div class="switch-title">允许游客访问</div>
+                            <div class="switch-desc">关闭后只允许社员及以上用户登录访问网站</div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="setting-allow-guest" onchange="saveSiteSettings()">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    
+                    <div class="switch-row">
+                        <div class="switch-info">
+                            <div class="switch-title">摆龙门阵功能</div>
+                            <div class="switch-desc">关闭后用户将无法进入摆龙门阵</div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="setting-chat-enabled" onchange="saveSiteSettings()">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    
+                    <div style="margin-top:12px;">
+                        <label style="display:block; font-size:0.85em; color:#666; margin-bottom:6px;">龙门阵游客上限</label>
+                        <div class="admin-field-row">
+                            <input type="number" id="setting-chat-guest-max" min="0" max="10" placeholder="10" style="flex:1;">
+                            <button onclick="saveSiteSettings()">保存</button>
+                        </div>
+                        <p style="font-size:0.75em; color:#888; margin-top:6px;">允许游客参与人数，范围0-10人，0表示禁止游客</p>
+                    </div>
+                    
+                    <div style="margin-top:12px;">
+                        <label style="display:block; font-size:0.85em; color:#666; margin-bottom:6px;">龙门阵人数上限</label>
+                        <div class="admin-field-row">
+                            <input type="number" id="setting-chat-max-users" min="5" max="100" placeholder="20" style="flex:1;">
+                            <button onclick="saveSiteSettings()">保存</button>
+                        </div>
+                        <p style="font-size:0.75em; color:#888; margin-top:6px;">限制同时在线人数，范围5-100人，默认20人</p>
+                    </div>
+                    
+                    <div style="margin-top:12px;">
+                        <label style="display:block; font-size:0.85em; color:#666; margin-bottom:6px;">聊天室缓存大小 (KB)</label>
+                        <div class="admin-field-row">
+                            <input type="number" id="setting-chat-cache-size" min="16" max="1024" placeholder="128" style="flex:1;">
+                            <button onclick="saveSiteSettings()">保存</button>
+                        </div>
+                        <p style="font-size:0.75em; color:#888; margin-top:6px;">消息缓存占用内存，范围16-1024KB，默认128KB</p>
                     </div>
                 </div>
             </div>
@@ -300,7 +435,7 @@
                         </div>
                     </div>
                     
-                    <div id="static-ip-fields" style="display:none; padding:15px; background:#f8f9fa; border-radius:8px; margin-top:10px;">
+                    <div id="static-ip-fields" class="hidden" style="padding:15px; background:#f8f9fa; border-radius:8px; margin-top:10px;">
                         <div class="wifi-form-grid">
                             <div>
                                 <label style="display:block; font-size:0.8em; color:#666; margin-bottom:4px;">IP地址</label>
@@ -414,31 +549,31 @@
         </section>
 
         <!-- Poems Section -->
-        <section id="poems" style="display:none;">
+        <section id="poems" class="hidden">
             <div class="header-row">
                 <h2>藏诗阁</h2>
-                <button onclick="openPoemModal()">撰写新作品</button>
+                <button id="btn-add-poem" onclick="openPoemModal()" class="hidden">撰写新作品</button>
             </div>
             
             <div id="poem-list"></div>
             
-            <button id="poem-load-more" class="load-more-btn" onclick="showAllPoems()" style="display:none;">查看更多作品</button>
+            <button id="poem-load-more" class="load-more-btn hidden" onclick="showAllPoems()">查看更多作品</button>
         </section>
 
         <!-- Activities Section -->
-        <section id="activities" style="display:none;">
+        <section id="activities" class="hidden">
             <div class="header-row">
                 <h2>诗社活动</h2>
-                <button onclick="openActivityModal()" id="btn-add-activity" style="display:none;">发起活动</button>
+                <button onclick="openActivityModal()" id="btn-add-activity" class="hidden">发起活动</button>
             </div>
             <div id="activity-list"></div>
         </section>
 
         <!-- Finance Section -->
-        <section id="finance" style="display:none;">
+        <section id="finance" class="hidden">
             <div class="header-row">
                 <h2>财务公示</h2>
-                <button onclick="toggleModal('modal-finance')" id="btn-add-finance" style="display:none;">记一笔</button>
+                <button onclick="toggleModal('modal-finance')" id="btn-add-finance" class="hidden">记一笔</button>
             </div>
             <div class="card finance-stats">
                 <div class="finance-balance">
@@ -463,26 +598,26 @@
         </section>
 
         <!-- Tasks Section -->
-        <section id="tasks" style="display:none;">
+        <section id="tasks" class="hidden">
             <div class="header-row">
                 <h2 id="tasks-section-title">事务与积分</h2>
-                <button onclick="openTaskModal()" id="btn-add-task" style="display:none;">发布事务</button>
+                <button onclick="openTaskModal()" id="btn-add-task" class="hidden">发布事务</button>
             </div>
             <div id="task-list"></div>
         </section>
 
         <!-- Members Section -->
-        <section id="members" style="display:none;">
+        <section id="members" class="hidden">
             <div class="header-row">
                 <h2>社员名录</h2>
-                <button onclick="openMemberModal()" id="btn-add-member" style="display:none;">录入社员</button>
+                <button onclick="openMemberModal()" id="btn-add-member" class="hidden">录入社员</button>
             </div>
             <div id="member-list" class="grid"></div>
         </section>
     </main>
 
     <!-- Modals -->
-    <div id="modal-poem" class="modal">
+    <div id="modal-poem" class="modal hidden">
         <div class="modal-content">
             <span class="close" onclick="toggleModal('modal-poem')"></span>
             <h3>发布新作</h3>
@@ -507,7 +642,7 @@
         </div>
     </div>
 
-    <div id="modal-finance" class="modal">
+    <div id="modal-finance" class="modal hidden">
         <div class="modal-content">
             <span class="close" onclick="toggleModal('modal-finance')"></span>
             <h3>财务记账</h3>
@@ -530,7 +665,7 @@
         </div>
     </div>
 
-    <div id="modal-task" class="modal">
+    <div id="modal-task" class="modal hidden">
         <div class="modal-content">
             <span class="close" onclick="toggleModal('modal-task')"></span>
             <h3 id="task-modal-title">发布事务</h3>
@@ -546,7 +681,7 @@
         </div>
     </div>
 
-    <div id="modal-member" class="modal">
+    <div id="modal-member" class="modal hidden">
         <div class="modal-content">
             <span class="close" onclick="toggleModal('modal-member')"></span>
             <h3>录入新社员</h3>
@@ -569,7 +704,7 @@
         </div>
     </div>
 
-    <div id="modal-profile" class="modal">
+    <div id="modal-profile" class="modal hidden">
         <div class="modal-content" style="max-width:450px;">
             <span class="close" onclick="toggleModal('modal-profile')"></span>
             <h3 style="margin-top:25px;">个人中心</h3>
@@ -599,7 +734,7 @@
         </div>
     </div>
 
-    <div id="modal-activity" class="modal">
+    <div id="modal-activity" class="modal hidden">
         <div class="modal-content">
             <span class="close" onclick="toggleModal('modal-activity')"></span>
             <h3>发起活动</h3>
@@ -619,7 +754,7 @@
     </div>
 
     <!-- Read-Only Activity Detail Modal -->
-    <div id="modal-activity-view" class="modal">
+    <div id="modal-activity-view" class="modal hidden">
         <div class="modal-content">
             <span class="close" onclick="toggleModal('modal-activity-view')"></span>
             <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-top:35px; margin-bottom:20px;">
@@ -634,7 +769,7 @@
     </div>
     
     <!-- Backup Progress Modal -->
-    <div id="modal-backup-progress" class="modal" style="z-index:10000; display:none; align-items:center; justify-content:center;">
+    <div id="modal-backup-progress" class="modal hidden" style="z-index:10000;">
         <div class="modal-content" style="max-width:360px; margin:auto; padding:20px 25px;">
             <h3 id="backup-progress-title" style="margin:0 0 15px 0; font-size:1.1em;">数据备份中...</h3>
             <div style="margin-bottom:12px;">

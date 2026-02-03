@@ -48,15 +48,55 @@ def start_watchdog_timer():
 
 app = Microdot()
 
+# 维护模式白名单（这些接口即使在维护模式下也可访问）
+MAINTENANCE_WHITELIST = [
+    '/api/login',
+    '/api/settings/system',
+]
+
+# 公开数据白名单（allow_guest=false时，这些GET接口仍可访问，因为前端已处理登录跳转）
+PUBLIC_DATA_WHITELIST = [
+    '/api/poems',
+    '/api/poems/random',
+    '/api/activities',
+    '/api/members',
+    '/api/chat/messages',
+    '/api/chat/users',
+    '/api/chat/status',
+    '/api/points/yearly_ranking',
+]
+
 def api_route(url, methods=['GET']):
     """
     API路由装饰器，包装原生route装饰器
     在API请求处理完成后自动触发LED快闪和看门狗喂狗
     支持路径参数（如 /api/backup/table/<table>）
+    包含维护模式检查和游客访问控制
     """
     def decorator(f):
         def wrapper(request, *args, **kwargs):
             watchdog.feed()  # 每次API请求时喂狗
+            
+            # 维护模式和游客访问检查（白名单接口除外）
+            if url not in MAINTENANCE_WHITELIST:
+                s = get_settings()
+                user_id, role = get_operator_role(request)
+                
+                # 维护模式检查
+                if s.get('maintenance_mode', False):
+                    if role not in ['super_admin', 'admin']:
+                        from lib.microdot import Response
+                        return Response('{"error": "系统维护中，请稍后再试"}', 503, {'Content-Type': 'application/json'})
+                
+                # 游客访问控制（未登录用户）
+                # 公开数据接口的GET请求允许访问（前端已处理登录跳转）
+                is_get_request = request.method == 'GET'
+                is_public_data = url in PUBLIC_DATA_WHITELIST
+                if not s.get('allow_guest', True) and not user_id:
+                    if not (is_get_request and is_public_data):
+                        from lib.microdot import Response
+                        return Response('{"error": "请先登录后访问"}', 401, {'Content-Type': 'application/json'})
+            
             result = f(request, *args, **kwargs)
             status_led.flash_once()  # API响应后LED快闪
             return result
@@ -720,7 +760,13 @@ def get_settings():
                 'password_salt': config.get('password_salt', 'weilu2018'),
                 'points_name': config.get('points_name', '围炉值'),
                 'system_name': config.get('system_name', '围炉诗社·理事台'),
-                'token_expire_days': config.get('token_expire_days', DEFAULT_TOKEN_EXPIRE_DAYS)
+                'token_expire_days': config.get('token_expire_days', DEFAULT_TOKEN_EXPIRE_DAYS),
+                'maintenance_mode': config.get('maintenance_mode', False),
+                'allow_guest': config.get('allow_guest', True),
+                'chat_enabled': config.get('chat_enabled', True),
+                'chat_guest_max': config.get('chat_guest_max', 10),
+                'chat_max_users': config.get('chat_max_users', 20),
+                'chat_cache_size': config.get('chat_cache_size', 128)
             }
     except: 
         return {
@@ -728,7 +774,13 @@ def get_settings():
             'password_salt': 'weilu2018',
             'points_name': '围炉值',
             'system_name': '围炉诗社·理事台',
-            'token_expire_days': DEFAULT_TOKEN_EXPIRE_DAYS
+            'token_expire_days': DEFAULT_TOKEN_EXPIRE_DAYS,
+            'maintenance_mode': False,
+            'allow_guest': True,
+            'chat_enabled': True,
+            'chat_guest_max': 10,
+            'chat_max_users': 20,
+            'chat_cache_size': 128
         }
     
 def save_settings(data):
@@ -739,7 +791,8 @@ def save_settings(data):
             config = json.load(f)
         
         # 更新系统设置部分
-        for key in ['custom_member_fields', 'password_salt', 'points_name', 'system_name', 'token_expire_days']:
+        for key in ['custom_member_fields', 'password_salt', 'points_name', 'system_name', 'token_expire_days',
+                    'maintenance_mode', 'allow_guest', 'chat_enabled', 'chat_guest_max', 'chat_max_users', 'chat_cache_size']:
             if key in data:
                 config[key] = data[key]
         
@@ -805,6 +858,28 @@ def list_poems(request):
     except Exception as e:
         error(f"获取诗歌列表失败: {e}", "API")
         return []
+
+@api_route('/api/poems/random', methods=['GET'])
+def random_poem(request):
+    """获取随机一首诗词（用于今日推荐）"""
+    try:
+        import urandom
+        total = db_poems.count()
+        if total == 0:
+            return None
+        # 生成随机索引
+        random_index = urandom.getrandbits(16) % total
+        # 读取该位置的诗词
+        count = 0
+        with open(db_poems.filepath, 'r') as f:
+            for line in f:
+                if count == random_index:
+                    return json.loads(line)
+                count += 1
+        return None
+    except Exception as e:
+        error(f"获取随机诗歌失败: {e}", "API")
+        return None
 
 @api_route('/api/poems', methods=['POST'])
 @require_login
@@ -1411,6 +1486,14 @@ def login_route(request):
                 try:
                     m = json.loads(line)
                     if m.get('phone') == p and verify_password(pw, m.get('password', '')):
+                        # 检查维护模式：只允许管理员登录
+                        s = get_settings()
+                        if s.get('maintenance_mode', False):
+                            role = m.get('role', 'member')
+                            if role not in ['super_admin', 'admin']:
+                                record_login_log(m.get('id'), m.get('name', '未知'), p, 'failed')
+                                return Response('{"error": "系统维护中，仅管理员可登录"}', 503, {'Content-Type': 'application/json'})
+                        
                         m_safe = m.copy()
                         if 'password' in m_safe: del m_safe['password']
                         # 生成登录Token
@@ -1547,17 +1630,25 @@ def settings_fields(request):
 
 @api_route('/api/settings/system', methods=['GET', 'POST'])
 def settings_system(request):
-    """获取或更新系统设置（系统名称、积分名称）"""
+    """获取或更新系统基础设置（理事及以上权限）
+    包含：系统名称、积分名称、维护模式、龙门阸开关、龙门阸人数上限、缓存大小
+    """
     s = get_settings()
     if request.method == 'GET':
-        # 公开返回系统名称和积分名称，不返回敏感的salt
+        # 公开返回系统基础设置，不返回敏感的salt
         return {
             "system_name": s.get('system_name', '围炉诗社·理事台'),
-            "points_name": s.get('points_name', '围炉值')
+            "points_name": s.get('points_name', '围炉值'),
+            "maintenance_mode": s.get('maintenance_mode', False),
+            "allow_guest": s.get('allow_guest', True),
+            "chat_enabled": s.get('chat_enabled', True),
+            "chat_guest_max": s.get('chat_guest_max', 10),
+            "chat_max_users": s.get('chat_max_users', 20),
+            "chat_cache_size": s.get('chat_cache_size', 128)
         }
     else:
         data = request.json
-        # 修改系统名称和积分名称需要理事权限
+        # 修改系统基础设置需要理事权限
         ok, err = check_permission(request, ROLE_DIRECTOR)
         if not ok:
             return err
@@ -1565,6 +1656,36 @@ def settings_system(request):
             s['system_name'] = data['system_name']
         if 'points_name' in data:
             s['points_name'] = data['points_name']
+        if 'maintenance_mode' in data:
+            s['maintenance_mode'] = bool(data['maintenance_mode'])
+        if 'allow_guest' in data:
+            s['allow_guest'] = bool(data['allow_guest'])
+        if 'chat_enabled' in data:
+            s['chat_enabled'] = bool(data['chat_enabled'])
+        if 'chat_guest_max' in data:
+            guest_max = int(data['chat_guest_max'])
+            # 限制范围：0-10人（对应路人甲-癸）
+            if guest_max < 0:
+                guest_max = 0
+            elif guest_max > 10:
+                guest_max = 10
+            s['chat_guest_max'] = guest_max
+        if 'chat_max_users' in data:
+            max_users = int(data['chat_max_users'])
+            # 限制范围：5-100人
+            if max_users < 5:
+                max_users = 5
+            elif max_users > 100:
+                max_users = 100
+            s['chat_max_users'] = max_users
+        if 'chat_cache_size' in data:
+            cache_size = int(data['chat_cache_size'])
+            # 限制范围：16-1024KB（考虑PSRAM 2MB限制）
+            if cache_size < 16:
+                cache_size = 16
+            elif cache_size > 1024:
+                cache_size = 1024
+            s['chat_cache_size'] = cache_size
         save_settings(s)
         return {"status": "success"}
 
@@ -2185,6 +2306,301 @@ def backup_import_table(request):
     except Exception as e:
         error(f"分表导入失败 [{table}]: {e}", "Backup")
         return Response(f'{{"error": "导入失败: {str(e)}"}}', 500, {'Content-Type': 'application/json'})
+
+# ============================================================================
+# 聊天室 - 内存缓存消息系统
+# ============================================================================
+
+# 聊天室配置
+CHAT_MAX_SIZE_DEFAULT = 128 * 1024  # 默认128KB 最大消息缓存
+CHAT_MSG_MAX_SIZE = 1024    # 单条消息最大字节数
+CHAT_GUEST_MAX_DEFAULT = 10 # 默认最大游客数量
+CHAT_GUEST_EXPIRE = 3600    # 游客昵称使用时长（秒）= 1小时
+CHAT_GUEST_NAMES = ['路人甲', '路人乙', '路人丙', '路人丁', '路人戊', 
+                    '路人己', '路人庚', '路人辛', '路人壬', '路人癸']
+
+def get_chat_max_size():
+    """获取聊天室缓存大小配置（KB转字节）"""
+    s = get_settings()
+    return s.get('chat_cache_size', 128) * 1024
+
+def get_chat_guest_max():
+    """获取龙门阵游客上限配置"""
+    s = get_settings()
+    return s.get('chat_guest_max', 10)
+
+# 内存缓存数据结构
+_chat_messages = []       # 消息列表: [{id, user_id, user_name, content, timestamp}, ...]
+_chat_users = {}          # 在线用户: {user_id: user_name, ...}
+_chat_guests = {}         # 游客映射: {guest_id: {'name': ..., 'expire': timestamp}, ...}
+_chat_current_size = 0    # 当前消息占用字节数
+_chat_msg_id = 0          # 消息ID计数器
+
+def _estimate_msg_size(msg):
+    """估算单条消息占用的内存大小"""
+    return len(json.dumps(msg))
+
+def _chat_cleanup():
+    """清理过期消息，保持总大小在限制内"""
+    global _chat_messages, _chat_current_size, _chat_users, _chat_guests
+    
+    max_size = get_chat_max_size()
+    # 删除最早的消息直到空间足够
+    while _chat_current_size > max_size and _chat_messages:
+        old_msg = _chat_messages.pop(0)
+        _chat_current_size -= _estimate_msg_size(old_msg)
+        
+        # 检查该用户是否还有消息
+        user_id = old_msg.get('user_id')
+        has_other_msg = any(m.get('user_id') == user_id for m in _chat_messages)
+        
+        if not has_other_msg:
+            # 移除用户在线状态
+            if user_id in _chat_users:
+                del _chat_users[user_id]
+            if user_id in _chat_guests:
+                del _chat_guests[user_id]
+    
+    gc.collect()
+
+def _get_member_display_name(member_id):
+    """获取成员显示名称（优先雅号）"""
+    try:
+        with open(db_members.filepath, 'r') as f:
+            for line in f:
+                m = json.loads(line)
+                if m.get('id') == member_id:
+                    return m.get('alias') or m.get('name') or '未知'
+    except:
+        pass
+    return '未知'
+
+def _allocate_guest_name():
+    """分配一个可用的游客昵称，返回 (guest_id, guest_name) 或 (None, None)"""
+    global _chat_guests
+    
+    # 检查游客上限配置
+    guest_max = get_chat_guest_max()
+    if guest_max <= 0:
+        return None, None  # 不允许游客
+    
+    now = int(time.time())
+    
+    # 先清理过期的游客
+    expired_ids = [gid for gid, info in _chat_guests.items() 
+                   if info.get('expire', 0) < now]
+    for gid in expired_ids:
+        del _chat_guests[gid]
+    
+    # 检查当前游客数量是否已达上限
+    if len(_chat_guests) >= guest_max:
+        return None, None
+    
+    # 查找可用的昵称（仅在配置范围内）
+    used_names = set(info.get('name') for info in _chat_guests.values())
+    for i, name in enumerate(CHAT_GUEST_NAMES[:guest_max]):
+        if name not in used_names:
+            guest_id = -(i + 1)  # 负数ID标识游客
+            return guest_id, name
+    return None, None
+
+def _get_guest_name(guest_id):
+    """获取游客昵称"""
+    info = _chat_guests.get(guest_id)
+    if info:
+        return info.get('name')
+    return None
+
+@api_route('/api/chat/messages', methods=['GET'])
+def chat_get_messages(request):
+    """获取聊天消息（支持增量获取）"""
+    try:
+        after_id = int(request.args.get('after', 0))
+        # 返回指定ID之后的消息
+        if after_id > 0:
+            messages = [m for m in _chat_messages if m.get('id', 0) > after_id]
+        else:
+            messages = list(_chat_messages)  # 返回所有消息
+        return messages
+    except Exception as e:
+        error(f"获取聊天消息失败: {e}", "Chat")
+        return []
+
+@api_route('/api/chat/users', methods=['GET'])
+def chat_get_users(request):
+    """获取当前在线用户列表"""
+    now = int(time.time())
+    # 合并登录用户和游客（过滤过期游客）
+    users = []
+    for uid, name in _chat_users.items():
+        users.append({'id': uid, 'name': name, 'is_guest': False})
+    for uid, info in _chat_guests.items():
+        if info.get('expire', 0) >= now:
+            users.append({'id': uid, 'name': info.get('name'), 'is_guest': True})
+    return users
+
+@api_route('/api/chat/join', methods=['POST'])
+def chat_join(request):
+    """加入聊天室（游客自动分配昵称，有效期1小时）"""
+    global _chat_users, _chat_guests
+    
+    # 检查聊天室是否开启
+    s = get_settings()
+    if not s.get('chat_enabled', True):
+        return Response('{"error": "龙门阵已关闭"}', 403, {'Content-Type': 'application/json'})
+    
+    data = request.json or {}
+    
+    # 检查是否登录用户
+    user_id, role = get_operator_role(request)
+    
+    # 公共人数限制检查（登录用户和游客都需要检查）
+    max_users = s.get('chat_max_users', 20)
+    now = int(time.time())
+    active_guests = sum(1 for info in _chat_guests.values() if info.get('expire', 0) >= now)
+    current_users = len(_chat_users) + active_guests
+    
+    if user_id:
+        # 登录用户：检查是否已在聊天室（已在则不重复计数）
+        if user_id not in _chat_users:
+            # 新用户加入，检查人数限制
+            if current_users >= max_users:
+                return Response('{"error": "龙门阵人数已满，请稍后再试"}', 403, {'Content-Type': 'application/json'})
+        # 登录用户，使用真实名称
+        display_name = _get_member_display_name(user_id)
+        _chat_users[user_id] = display_name
+        return {'user_id': user_id, 'user_name': display_name, 'is_guest': False}
+    else:
+        # 游客：检查人数限制
+        if current_users >= max_users:
+            return Response('{"error": "龙门阵人数已满，请稍后再试"}', 403, {'Content-Type': 'application/json'})
+        
+        # 游客，自动分配昵称
+        guest_id, guest_name = _allocate_guest_name()
+        if guest_id is None:
+            return Response('{"error": "游客位置已满，请稍后再试"}', 403, {'Content-Type': 'application/json'})
+        
+        # 记录游客信息，设置过期时间
+        _chat_guests[guest_id] = {
+            'name': guest_name,
+            'expire': int(time.time()) + CHAT_GUEST_EXPIRE
+        }
+        return {'user_id': guest_id, 'user_name': guest_name, 'is_guest': True}
+
+@api_route('/api/chat/send', methods=['POST'])
+def chat_send_message(request):
+    """发送聊天消息"""
+    global _chat_messages, _chat_current_size, _chat_msg_id, _chat_users, _chat_guests
+    
+    # 检查聊天室是否开启
+    s = get_settings()
+    if not s.get('chat_enabled', True):
+        return Response('{"error": "龙门阵已关闭"}', 403, {'Content-Type': 'application/json'})
+    
+    data = request.json or {}
+    content = data.get('content', '').strip()
+    request_user_id = data.get('user_id')  # 前端传来的用户ID
+    
+    if not content:
+        return Response('{"error": "消息内容不能为空"}', 400, {'Content-Type': 'application/json'})
+    
+    # 检查消息大小限制
+    content_bytes = content.encode('utf-8')
+    if len(content_bytes) > CHAT_MSG_MAX_SIZE:
+        return Response('{"error": "消息过长，最多256个中文字符"}', 400, {'Content-Type': 'application/json'})
+    
+    # 验证发送者身份
+    sender_id = None
+    user_name = None
+    is_guest = False
+    
+    # 严格鉴权：先检查Token获取登录用户身份
+    token_user_id, _ = get_operator_role(request)
+    
+    if token_user_id:
+        # 已登录用户：只使用Token中的身份，忽略请求体中的user_id，防止冒充
+        sender_id = token_user_id
+        user_name = _chat_users.get(sender_id) or _get_member_display_name(sender_id)
+        _chat_users[sender_id] = user_name
+    elif request_user_id and request_user_id < 0:
+        # 游客：验证游客身份（负数ID）
+        sender_id = request_user_id
+        if sender_id not in _chat_guests:
+            return Response('{"error": "请先加入龙门阵"}', 401, {'Content-Type': 'application/json'})
+        guest_info = _chat_guests[sender_id]
+        # 检查是否过期
+        if guest_info.get('expire', 0) < int(time.time()):
+            del _chat_guests[sender_id]
+            return Response('{"error": "昵称已过期，请重新加入"}', 401, {'Content-Type': 'application/json'})
+        user_name = guest_info.get('name')
+        is_guest = True
+    elif request_user_id and request_user_id > 0:
+        # 请求体中包含正数user_id但无有效Token：拒绝，防止冒充登录用户
+        return Response('{"error": "登录已过期，请重新登录"}', 401, {'Content-Type': 'application/json'})
+    else:
+        return Response('{"error": "请先加入聊天室"}', 401, {'Content-Type': 'application/json'})
+    
+    # 构建消息
+    _chat_msg_id += 1
+    msg = {
+        'id': _chat_msg_id,
+        'user_id': sender_id,
+        'user_name': user_name,
+        'content': content,
+        'timestamp': int(time.time()),
+        'is_guest': is_guest
+    }
+    
+    # 添加消息并更新大小
+    msg_size = _estimate_msg_size(msg)
+    _chat_messages.append(msg)
+    _chat_current_size += msg_size
+    
+    # 检查并清理超限消息
+    _chat_cleanup()
+    
+    return msg
+
+@api_route('/api/chat/leave', methods=['POST'])
+def chat_leave(request):
+    """离开聊天室"""
+    global _chat_users, _chat_guests
+    
+    data = request.json or {}
+    user_id = data.get('user_id')
+    
+    # 也检查Token
+    token_user_id, _ = get_operator_role(request)
+    if token_user_id:
+        user_id = token_user_id
+    
+    if user_id in _chat_users:
+        del _chat_users[user_id]
+    if user_id in _chat_guests:
+        del _chat_guests[user_id]
+    
+    return {'status': 'success'}
+
+@api_route('/api/chat/status', methods=['GET'])
+def chat_status(request):
+    """获取聊天室状态（内存使用、用户数等）"""
+    now = int(time.time())
+    s = get_settings()
+    # 计算未过期的游客数量
+    active_guests = sum(1 for info in _chat_guests.values() if info.get('expire', 0) >= now)
+    max_users = s.get('chat_max_users', 20)
+    guest_max = get_chat_guest_max()
+    return {
+        'memory_used': _chat_current_size,
+        'memory_limit': get_chat_max_size(),
+        'message_count': len(_chat_messages),
+        'user_count': len(_chat_users) + active_guests,
+        'max_users': max_users,
+        'guest_count': active_guests,
+        'guest_available': guest_max - active_guests,
+        'guest_max': guest_max,
+        'chat_enabled': s.get('chat_enabled', True)
+    }
 
 if __name__ == '__main__':
     try:

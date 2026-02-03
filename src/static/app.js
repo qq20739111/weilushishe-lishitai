@@ -222,7 +222,7 @@ function handleTokenExpired() {
  * 从localStorage读取用户信息，验证Token是否过期
  * 未登录也允许访问部分页面
  */
-function checkLogin() {
+async function checkLogin() {
     const user = localStorage.getItem('user');
     if (user) {
         currentUser = JSON.parse(user);
@@ -240,9 +240,28 @@ function checkLogin() {
         currentUser = null;
     }
     
-    // 无论是否登录都显示主应用界面
-    document.getElementById('login-section').style.display = 'none';
-    document.getElementById('main-app').style.display = 'block';
+    // 获取系统设置
+    const settings = await checkSystemSettings();
+    const isAdmin = currentUser && ['super_admin', 'admin'].includes(currentUser.role);
+    
+    // 检查维护模式
+    if (settings.maintenance_mode && !isAdmin) {
+        // 维护模式且非管理员，显示维护页面
+        showMaintenancePage();
+        return;
+    }
+    
+    // 检查游客访问控制
+    if (!settings.allow_guest && !currentUser) {
+        // 禁止游客访问且未登录，显示登录页
+        showLoginPage();
+        return;
+    }
+    
+    // 正常模式，显示主应用界面
+    document.getElementById('maintenance-section').classList.add('hidden');
+    document.getElementById('login-section').classList.add('hidden');
+    document.getElementById('main-app').classList.remove('hidden');
     
     // 更新导航栏显示
     updateNavForLoginState();
@@ -264,12 +283,12 @@ function updateNavForLoginState() {
     
     // 需要登录才能看到的导航项
     document.querySelectorAll('.nav-login-required').forEach(el => {
-        el.style.display = isLoggedIn ? '' : 'none';
+        el.classList.toggle('hidden', !isLoggedIn);
     });
     
     // 仅游客可见的导航项
     document.querySelectorAll('.nav-guest-only').forEach(el => {
-        el.style.display = isLoggedIn ? 'none' : '';
+        el.classList.toggle('hidden', isLoggedIn);
     });
 }
 
@@ -277,8 +296,50 @@ function updateNavForLoginState() {
  * 显示登录页面
  */
 function showLoginPage() {
-    document.getElementById('main-app').style.display = 'none';
-    document.getElementById('login-section').style.display = 'flex';
+    document.getElementById('main-app').classList.add('hidden');
+    document.getElementById('maintenance-section').classList.add('hidden');
+    document.getElementById('login-section').classList.remove('hidden');
+}
+
+/**
+ * 显示维护模式页面
+ */
+function showMaintenancePage() {
+    document.getElementById('main-app').classList.add('hidden');
+    document.getElementById('login-section').classList.add('hidden');
+    document.getElementById('maintenance-section').classList.remove('hidden');
+}
+
+/**
+ * 维护模式下的管理员登录入口
+ */
+function showMaintenanceLogin() {
+    document.getElementById('maintenance-section').classList.add('hidden');
+    document.getElementById('login-section').classList.remove('hidden');
+    // 标记为维护模式登录
+    window._maintenanceLoginMode = true;
+}
+
+/**
+ * 检查维护模式状态
+ * @returns {Promise<object>} 系统设置对象
+ */
+async function checkSystemSettings() {
+    try {
+        const res = await fetch(`${API_BASE}/settings/system`);
+        if (res.ok) {
+            return await res.json();
+        }
+    } catch(e) {
+        console.error('检查系统设置失败:', e);
+    }
+    return { maintenance_mode: false, allow_guest: true };
+}
+
+// 保留旧函数名以兼容
+async function checkMaintenanceMode() {
+    const settings = await checkSystemSettings();
+    return settings.maintenance_mode === true;
 }
 
 /**
@@ -316,9 +377,19 @@ async function login() {
                 delete user.expires_in;  // 移除原字段，只保留计算后的时间戳
             }
             localStorage.setItem('user', JSON.stringify(user));
+            window._maintenanceLoginMode = false;
             checkLogin();
         } else {
-            alert('登录失败: 账号或密码错误');
+            const err = await res.json().catch(() => ({}));
+            if (res.status === 503) {
+                // 维护模式，非管理员登录被拒绝
+                alert(err.error || '系统维护中，仅管理员可登录');
+                if (window._maintenanceLoginMode) {
+                    showMaintenancePage();
+                }
+            } else {
+                alert('登录失败: ' + (err.error || '账号或密码错误'));
+            }
         }
     } catch (e) {
         alert('登录出错: ' + e.message);
@@ -328,8 +399,8 @@ async function login() {
 function logout() {
     localStorage.removeItem('user');
     currentUser = null;
-    updateNavForLoginState();
-    showSection('home'); // 退出后回到首页
+    // 重新检查登录状态和系统设置（allow_guest检查）
+    checkLogin();
 }
 
 /**
@@ -544,7 +615,7 @@ let _lastSection = 'home';
  */
 function showSection(id) {
     // 未登录用户只能访问特定页面
-    const guestAllowedSections = ['home', 'activities', 'poems', 'members'];
+    const guestAllowedSections = ['home', 'activities', 'poems', 'members', 'chat'];
     if (!currentUser && !guestAllowedSections.includes(id)) {
         // 提示用户需要登录
         alert('请先登录后再访问此功能');
@@ -557,8 +628,8 @@ function showSection(id) {
         _lastSection = id;
     }
 
-    document.querySelectorAll('main > section').forEach(el => el.style.display = 'none');
-    document.getElementById(id).style.display = 'block';
+    document.querySelectorAll('main > section').forEach(el => el.classList.add('hidden'));
+    document.getElementById(id).classList.remove('hidden');
     
     // Toggle Search Bar Visibility
     // Only show on: home, activities, poems, tasks
@@ -568,7 +639,7 @@ function showSection(id) {
         const visibleSections = ['home', 'activities', 'poems', 'tasks', 'search-results-section'];
         // 未登录时搜索框只在允许的页面显示
         const shouldShow = visibleSections.includes(id) && (currentUser || guestAllowedSections.includes(id));
-        searchContainer.style.display = shouldShow ? 'block' : 'none';
+        searchContainer.classList.toggle('hidden', !shouldShow);
     }
     
     // Auto-fetch data based on section
@@ -577,8 +648,15 @@ function showSection(id) {
     if(id === 'members') fetchMembers();
     if(id === 'finance') fetchFinance();
     if(id === 'tasks') fetchTasks();
+    if(id === 'chat') initChat();
     if(id === 'home' || id === 'admin') {
         loadSystemInfo();
+        // 首页也加载聊天预览（需要先检查chat_enabled设置）
+        if(id === 'home') {
+            checkChatEnabledAndLoad();
+        } else {
+            stopHomeChatPolling();   // 离开首页时停止
+        }
         if(id === 'admin') {
             renderAdminSettings();
             // 系统页权限控制
@@ -588,22 +666,27 @@ function showSection(id) {
             
             // 管理员级别栏目（WiFi设置、安全设置）
             document.querySelectorAll('.admin-only-card').forEach(card => {
-                card.style.display = isAdmin ? 'block' : 'none';
+                card.classList.toggle('hidden', !isAdmin);
             });
             // 理事级别栏目（系统设置、日志、备份、自定义字段）
             document.querySelectorAll('.director-only-card').forEach(card => {
-                card.style.display = isDirector ? 'block' : 'none';
+                card.classList.toggle('hidden', !isDirector);
             });
         }
+    } else {
+        stopHomeChatPolling();  // 切换到其他页面时停止首页聊天刷新
     }
 
     // Check permissions
     const btnAddMember = document.getElementById('btn-add-member');
     const btnAddActivity = document.getElementById('btn-add-activity');
+    const btnAddPoem = document.getElementById('btn-add-poem');
     const isManager = currentUser && ['super_admin', 'admin', 'director'].includes(currentUser.role);
+    const isLoggedIn = !!currentUser;
 
-    if (btnAddMember) btnAddMember.style.display = isManager ? 'block' : 'none';
-    if (btnAddActivity) btnAddActivity.style.display = isManager ? 'block' : 'none';
+    if (btnAddMember) btnAddMember.classList.toggle('hidden', !isManager);
+    if (btnAddActivity) btnAddActivity.classList.toggle('hidden', !isManager);
+    if (btnAddPoem) btnAddPoem.classList.toggle('hidden', !isLoggedIn);
 }
 
 // ============================================================================
@@ -620,16 +703,16 @@ let _currentOpenModal = null;
  */
 function toggleModal(id) {
     const el = document.getElementById(id);
-    const isOpening = el.style.display !== 'block';
+    const isOpening = el.classList.contains('hidden');
     
     if (isOpening) {
         // 打开模态框
-        el.style.display = 'block';
+        el.classList.remove('hidden');
         _currentOpenModal = id;
         document.body.style.overflow = 'hidden'; // 禁止背景滚动
     } else {
         // 关闭模态框
-        el.style.display = 'none';
+        el.classList.add('hidden');
         _currentOpenModal = null;
         document.body.style.overflow = ''; // 恢复滚动
     }
@@ -642,7 +725,7 @@ function toggleModal(id) {
 function closeModal(id) {
     const el = document.getElementById(id);
     if (el) {
-        el.style.display = 'none';
+        el.classList.add('hidden');
         if (_currentOpenModal === id) {
             _currentOpenModal = null;
             document.body.style.overflow = '';
@@ -756,23 +839,26 @@ function renderPoems() {
         // Create if missing (it might be static html, but let's check)
         loadMoreBtn = document.createElement('button');
         loadMoreBtn.id = 'poem-load-more';
-        loadMoreBtn.className = 'load-more-btn';
+        loadMoreBtn.className = 'load-more-btn hidden';
         loadMoreBtn.innerText = '加载更多';
         loadMoreBtn.onclick = loadMorePoems;
-        loadMoreBtn.style.display = 'none';
         container.parentElement.appendChild(loadMoreBtn);
     }
     
     if (_poemHasMore) {
-        loadMoreBtn.style.display = 'block';
+        loadMoreBtn.classList.remove('hidden');
         loadMoreBtn.innerText = '加载更多...';
     } else {
-        loadMoreBtn.style.display = 'none';
+        loadMoreBtn.classList.add('hidden');
     }
 
     // 空数据时显示友好提示
     if (displayList.length === 0) {
-        showEmptyState('poem-list', '📜', '诗阁暂无收藏，快来创作第一首诗吧！', '开始创作', 'openPoemModal()');
+        if (currentUser) {
+            showEmptyState('poem-list', '📜', '诗阁暂无收藏，快来创作第一首诗吧！', '开始创作', 'openPoemModal()');
+        } else {
+            showEmptyState('poem-list', '📜', '诗阁暂无收藏');
+        }
         return;
     }
 
@@ -1390,7 +1476,7 @@ async function fetchFinance() {
     const addFinanceBtn = document.getElementById('btn-add-finance');
     if(addFinanceBtn && currentUser) {
         const canRecord = ['super_admin', 'admin', 'finance'].includes(currentUser.role);
-        addFinanceBtn.style.display = canRecord ? 'inline-block' : 'none';
+        addFinanceBtn.classList.toggle('hidden', !canRecord);
     }
     
     try {
@@ -1452,7 +1538,7 @@ async function fetchTasks() {
     const addTaskBtn = document.getElementById('btn-add-task');
     if(addTaskBtn && currentUser) {
         const canCreate = ['super_admin', 'admin', 'director'].includes(currentUser.role);
-        addTaskBtn.style.display = canCreate ? 'inline-block' : 'none';
+        addTaskBtn.classList.toggle('hidden', !canCreate);
     }
     
     showLoading('task-list');
@@ -1937,7 +2023,7 @@ async function submitActivity() {
             data.id = editingActivityId;
         }
 
-        const res = await fetch(url, {
+        const res = await fetchWithAuth(url, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(data)
@@ -2141,15 +2227,14 @@ async function deleteActivityInView(id) {
 }
 
 async function loadSystemInfo() {
-    // 未登录用户不加载系统信息
-    if (!currentUser) return;
-    
     // 确保成员缓存已加载（用于首页显示诗作作者）
     await ensureMembersCached();
     
-    try {
-        const res = await fetchWithAuth(`${API_BASE}/system/info`);
-        const info = await res.json();
+    // 系统信息仅登录用户可查看
+    if (currentUser) {
+        try {
+            const res = await fetchWithAuth(`${API_BASE}/system/info`);
+            const info = await res.json();
         
         // Convert bytes to KB
         const free = Math.round(info.free_storage / 1024);
@@ -2257,12 +2342,17 @@ async function loadSystemInfo() {
                 apBadge.style.background = info.ap_active ? activeColor : inactiveColor;
             }
         }
-            
-        // Load Daily Recommendation (Random)
-        const pRes = await fetch(`${API_BASE}/poems`);
-        const poems = await pRes.json();
-        if(poems.length > 0) {
-            const p = poems[Math.floor(Math.random() * poems.length)];
+        } catch(e) {
+            console.error('加载系统信息失败:', e);
+        }
+    }
+    
+    // 以下为首页公开内容，所有用户可见
+    try {
+        // Load Daily Recommendation (Random from all poems)
+        const pRes = await fetch(`${API_BASE}/poems/random`);
+        const p = await pRes.json();
+        if(p && p.title) {
             document.getElementById('daily-poem').innerHTML = `
                 <h4>${p.title}</h4>
                 <p style="white-space: pre-wrap;">${p.content}</p>
@@ -2303,7 +2393,7 @@ async function loadSystemInfo() {
                     `).join('');
                 }
             } catch(e) {
-                homeActList.innerText = '加载活动失败';
+                homeActList.innerHTML = '<div class="empty-hint">加载失败，请刷新重试</div>';
                 console.error(e);
             }
         }
@@ -2347,7 +2437,7 @@ async function loadLatestPoems() {
         `).join('');
     } catch(e) {
         console.error(e);
-        container.innerHTML = '<p style="color:#e74c3c;">加载失败</p>';
+        container.innerHTML = '<div class="empty-hint">加载失败，请刷新重试</div>';
     }
 }
 
@@ -2383,12 +2473,12 @@ async function loadPointsRanking() {
                     <span style="font-size:${i < 3 ? '1.2em' : '0.9em'}; min-width:24px; text-align:center;">${medals[i]}</span>
                     <span style="font-weight:${i < 3 ? '600' : '400'};">${m.alias || m.name}</span>
                 </div>
-                <span class="points-badge" title="年度新增${pointsName}">🪙 +${m.yearly_points || 0}</span>
+                <span class="points-badge" title="年度新增${pointsName}">❤️‍🔥 +${m.yearly_points || 0}</span>
             </div>
         `).join('');
     } catch(e) {
         console.error(e);
-        container.innerHTML = '<p style="color:#e74c3c;">加载失败</p>';
+        container.innerHTML = '<div class="empty-hint">加载失败，请刷新重试</div>';
     }
 }
 
@@ -2423,8 +2513,8 @@ async function handleGlobalSearch(term) {
     }
     
     // Switch to search results section immediately
-    document.querySelectorAll('main > section').forEach(el => el.style.display = 'none');
-    document.getElementById('search-results-section').style.display = 'block';
+    document.querySelectorAll('main > section').forEach(el => el.classList.add('hidden'));
+    document.getElementById('search-results-section').classList.remove('hidden');
     
     // Optimistic UI for immediate feedback
     const resultsContainer = document.getElementById('search-results-container');
@@ -2491,7 +2581,7 @@ async function handleGlobalSearch(term) {
 function clearGlobalSearch() {
     document.getElementById('global-search-input').value = '';
     _globalSearchTerm = '';
-    document.getElementById('search-results-section').style.display = 'none';
+    document.getElementById('search-results-section').classList.add('hidden');
     
     // Restore the section the user was on before searching
     if (_lastSection) {
@@ -2524,7 +2614,7 @@ window.onload = function() {
     } catch(e) {
         console.error("Init Error:", e);
         // Fallback: Ensure login screen is visible if something crashes
-        document.getElementById('login-section').style.display = 'flex';
+        document.getElementById('login-section').classList.remove('hidden');
     }
 }
 
@@ -2679,6 +2769,95 @@ async function saveTokenExpireDays() {
     }
 }
 
+// 加载站点功能设置
+async function loadSiteSettings() {
+    try {
+        const res = await fetch(`${API_BASE}/settings/system`);
+        if(res.ok) {
+            const data = await res.json();
+            const maintenanceEl = document.getElementById('setting-maintenance-mode');
+            const allowGuestEl = document.getElementById('setting-allow-guest');
+            const chatEnabledEl = document.getElementById('setting-chat-enabled');
+            const chatGuestMaxEl = document.getElementById('setting-chat-guest-max');
+            const chatMaxUsersEl = document.getElementById('setting-chat-max-users');
+            const chatCacheSizeEl = document.getElementById('setting-chat-cache-size');
+            if(maintenanceEl) maintenanceEl.checked = data.maintenance_mode === true;
+            if(allowGuestEl) allowGuestEl.checked = data.allow_guest !== false;
+            if(chatEnabledEl) chatEnabledEl.checked = data.chat_enabled !== false;
+            if(chatGuestMaxEl) chatGuestMaxEl.value = data.chat_guest_max ?? 10;
+            if(chatMaxUsersEl) chatMaxUsersEl.value = data.chat_max_users || 20;
+            if(chatCacheSizeEl) chatCacheSizeEl.value = data.chat_cache_size || 128;
+        }
+    } catch(e) {
+        console.error('加载站点设置失败:', e);
+    }
+}
+
+// 保存站点功能设置
+async function saveSiteSettings() {
+    const maintenanceEl = document.getElementById('setting-maintenance-mode');
+    const allowGuestEl = document.getElementById('setting-allow-guest');
+    const chatEnabledEl = document.getElementById('setting-chat-enabled');
+    const chatGuestMaxEl = document.getElementById('setting-chat-guest-max');
+    const chatMaxUsersEl = document.getElementById('setting-chat-max-users');
+    const chatCacheSizeEl = document.getElementById('setting-chat-cache-size');
+    
+    const settings = {};
+    if(maintenanceEl) settings.maintenance_mode = maintenanceEl.checked;
+    if(allowGuestEl) settings.allow_guest = allowGuestEl.checked;
+    if(chatEnabledEl) settings.chat_enabled = chatEnabledEl.checked;
+    
+    // 校验龙门阵游客上限 (0-10)
+    if(chatGuestMaxEl && chatGuestMaxEl.value !== '') {
+        const guestMax = parseInt(chatGuestMaxEl.value);
+        if(isNaN(guestMax) || guestMax < 0 || guestMax > 10) {
+            alert('龙门阵游客上限必须为0-10之间的整数');
+            chatGuestMaxEl.focus();
+            return;
+        }
+        settings.chat_guest_max = guestMax;
+    }
+    
+    // 校验龙门阵人数上限 (5-100)
+    if(chatMaxUsersEl && chatMaxUsersEl.value !== '') {
+        const maxUsers = parseInt(chatMaxUsersEl.value);
+        if(isNaN(maxUsers) || maxUsers < 5 || maxUsers > 100) {
+            alert('龙门阵人数上限必须为5-100之间的整数');
+            chatMaxUsersEl.focus();
+            return;
+        }
+        settings.chat_max_users = maxUsers;
+    }
+    
+    // 校验聊天室缓存大小 (16-1024 KB)
+    if(chatCacheSizeEl && chatCacheSizeEl.value !== '') {
+        const cacheSize = parseInt(chatCacheSizeEl.value);
+        if(isNaN(cacheSize) || cacheSize < 16 || cacheSize > 1024) {
+            alert('聊天室缓存大小必须为16-1024之间的整数');
+            chatCacheSizeEl.focus();
+            return;
+        }
+        settings.chat_cache_size = cacheSize;
+    }
+    
+    try {
+        const res = await fetchWithAuth(`${API_BASE}/settings/system`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(settings)
+        });
+        if(res.ok) {
+            alert('功能设置已保存');
+        } else {
+            const err = await res.json().catch(() => ({}));
+            alert('保存失败: ' + (err.error || '权限不足'));
+        }
+    } catch(e) {
+        console.error(e);
+        alert('网络错误');
+    }
+}
+
 // 获取积分名称
 function getPointsName() {
     return _systemSettings.points_name || '围炉值';
@@ -2738,6 +2917,9 @@ function renderAdminSettings() {
     
     // 加载WiFi配置
     loadWifiConfig();
+    
+    // 加载站点功能设置
+    loadSiteSettings();
     
     // 加载登录日志（必须在 return 之前调用）
     fetchLoginLogs();
@@ -2806,7 +2988,7 @@ async function fetchLoginLogs() {
         `).join('');
     } catch(e) {
         console.error(e);
-        container.innerHTML = '<p style="color:#e74c3c;">加载失败</p>';
+        container.innerHTML = '<div class="empty-hint">加载失败，请刷新重试</div>';
     }
 }
 
@@ -2815,7 +2997,7 @@ function toggleStaticIpFields() {
     const staticRadio = document.querySelector('input[name="wifi-ip-mode"][value="static"]');
     const fields = document.getElementById('static-ip-fields');
     if(staticRadio && fields) {
-        fields.style.display = staticRadio.checked ? 'block' : 'none';
+        fields.classList.toggle('hidden', !staticRadio.checked);
     }
 }
 
@@ -2931,7 +3113,7 @@ function showBackupProgress(title) {
     document.getElementById('backup-progress-percent').innerText = '0%';
     document.getElementById('backup-progress-bar').style.width = '0%';
     document.getElementById('backup-progress-detail').innerText = '正在初始化...';
-    document.getElementById('modal-backup-progress').style.display = 'flex';
+    document.getElementById('modal-backup-progress').classList.remove('hidden');
 }
 
 function updateBackupProgress(percent, status, detail) {
@@ -2942,7 +3124,7 @@ function updateBackupProgress(percent, status, detail) {
 }
 
 function hideBackupProgress() {
-    document.getElementById('modal-backup-progress').style.display = 'none';
+    document.getElementById('modal-backup-progress').classList.add('hidden');
 }
 
 async function exportBackup() {
@@ -3195,4 +3377,620 @@ async function importBackup(event) {
     }
     
     document.getElementById('backup-file-input').value = '';
+}
+
+// ============================================================================
+// 聊天室功能
+// ============================================================================
+
+// 聊天室状态变量
+let _chatUserId = null;         // 当前用户在聊天室的ID
+let _chatUserName = null;       // 当前用户在聊天室的名称
+let _chatIsGuest = false;       // 是否为游客
+let _chatLastMsgId = 0;         // 最后一条消息ID（用于增量获取）
+let _chatPollingTimer = null;   // 轮询定时器
+let _chatJoined = false;        // 是否已加入聊天室
+let _homeChatTimer = null;      // 首页聊天刷新定时器
+let _homeChatLastMsgId = 0;     // 首页聊天最后消息ID
+let _homeChatMessages = [];     // 首页聊天消息缓存
+
+const CHAT_MAX_CHARS = 256;     // 最大字符数
+const CHAT_POLL_INTERVAL = 10000; // 轮询间隔（10秒）
+const HOME_CHAT_INTERVAL = 10000; // 首页聊天刷新间隔（10秒）
+
+/**
+ * 初始化聊天室
+ */
+async function initChat() {
+    // 绑定输入框事件
+    const input = document.getElementById('chat-input');
+    if (input) {
+        input.addEventListener('input', updateChatCharCount);
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendChatMessage();
+            }
+        });
+    }
+    
+    // 加入聊天室
+    await joinChat();
+    
+    // 开始轮询
+    startChatPolling();
+    
+    // 加载初始数据
+    await loadChatMessages();
+    await loadChatUsers();
+    await loadChatStatus();
+}
+
+/**
+ * 加入聊天室（游客自动分配昵称）
+ */
+async function joinChat() {
+    if (_chatJoined) return true;
+    
+    try {
+        const res = await fetchWithAuth(`${API_BASE}/chat/join`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({})
+        });
+        
+        if (res.ok) {
+            const data = await res.json();
+            _chatUserId = data.user_id;
+            _chatUserName = data.user_name;
+            _chatIsGuest = data.is_guest;
+            _chatJoined = true;
+            return true;
+        } else {
+            const err = await res.json().catch(() => ({}));
+            if (err.error) {
+                alert(err.error);
+            }
+            return false;
+        }
+    } catch(e) {
+        console.error('加入聊天室失败:', e);
+        return false;
+    }
+}
+
+/**
+ * 离开聊天室
+ */
+async function leaveChat() {
+    if (!_chatJoined) return;
+    
+    try {
+        await fetchWithAuth(`${API_BASE}/chat/leave`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ user_id: _chatUserId })
+        });
+    } catch(e) {
+        console.error('离开聊天室失败:', e);
+    }
+    
+    _chatJoined = false;
+    _chatUserId = null;
+    _chatUserName = null;
+    stopChatPolling();
+}
+
+/**
+ * 开始消息轮询
+ */
+function startChatPolling() {
+    if (_chatPollingTimer) return;
+    
+    _chatPollingTimer = setInterval(async () => {
+        await loadChatMessages(true);
+        await loadChatUsers();
+        await loadChatStatus();
+    }, CHAT_POLL_INTERVAL);
+}
+
+/**
+ * 停止消息轮询
+ */
+function stopChatPolling() {
+    if (_chatPollingTimer) {
+        clearInterval(_chatPollingTimer);
+        _chatPollingTimer = null;
+    }
+}
+
+/**
+ * 加载聊天消息
+ */
+async function loadChatMessages(incremental = false) {
+    try {
+        const afterId = incremental ? _chatLastMsgId : 0;
+        const res = await fetch(`${API_BASE}/chat/messages?after=${afterId}`);
+        const messages = await res.json();
+        
+        if (!incremental) {
+            // 全量加载
+            renderChatMessages(messages);
+        } else if (messages.length > 0) {
+            // 增量追加
+            appendChatMessages(messages);
+        } else if (_chatLastMsgId > 0) {
+            // 增量返回空且有旧ID，可能服务器已重启，做一次全量检测
+            const checkRes = await fetch(`${API_BASE}/chat/messages?after=0`);
+            const allMessages = await checkRes.json();
+            if (allMessages.length === 0 || (allMessages.length > 0 && allMessages[allMessages.length - 1].id < _chatLastMsgId)) {
+                // 服务器消息已重置，全量重载
+                _chatLastMsgId = 0;
+                renderChatMessages(allMessages);
+                if (allMessages.length > 0) {
+                    _chatLastMsgId = Math.max(...allMessages.map(m => m.id));
+                }
+                return;
+            }
+        }
+        
+        // 更新最后消息ID
+        if (messages.length > 0) {
+            _chatLastMsgId = Math.max(...messages.map(m => m.id));
+        }
+    } catch(e) {
+        console.error('加载聊天消息失败:', e);
+    }
+}
+
+/**
+ * 渲染聊天消息（全量）
+ */
+function renderChatMessages(messages) {
+    const container = document.getElementById('chat-messages');
+    if (!container) return;
+    
+    if (messages.length === 0) {
+        container.innerHTML = '<div class="empty-hint">暂无消息，快来说点什么吧</div>';
+        return;
+    }
+    
+    container.innerHTML = messages.map(m => renderSingleMessage(m)).join('');
+    container.scrollTop = container.scrollHeight;
+}
+
+/**
+ * 追加聊天消息（增量）
+ */
+function appendChatMessages(messages) {
+    const container = document.getElementById('chat-messages');
+    if (!container) return;
+    
+    // 移除空状态提示
+    const emptyHint = container.querySelector('.empty-hint');
+    if (emptyHint) emptyHint.remove();
+    
+    messages.forEach(m => {
+        container.insertAdjacentHTML('beforeend', renderSingleMessage(m));
+    });
+    
+    container.scrollTop = container.scrollHeight;
+}
+
+/**
+ * 渲染单条消息
+ */
+function renderSingleMessage(msg) {
+    const isSelf = msg.user_id === _chatUserId;
+    const isGuest = msg.is_guest;
+    const timeStr = formatMessageTime(msg.timestamp);
+    
+    let classes = 'chat-message';
+    if (isSelf) classes += ' is-self';
+    if (isGuest) classes += ' is-guest';
+    
+    return `
+        <div class="${classes}">
+            <div class="chat-message-header">
+                <span class="chat-message-user ${isGuest ? 'guest' : ''}">${msg.user_name}</span>
+                <span class="chat-message-time">${timeStr}</span>
+            </div>
+            <div class="chat-message-content">${escapeHtml(msg.content)}</div>
+        </div>
+    `;
+}
+
+/**
+ * 格式化消息时间
+ */
+function formatMessageTime(timestamp) {
+    const date = new Date(timestamp * 1000);
+    const now = new Date();
+    const hours = date.getHours().toString().padStart(2, '0');
+    const mins = date.getMinutes().toString().padStart(2, '0');
+    
+    // 如果是今天，只显示时间
+    if (date.toDateString() === now.toDateString()) {
+        return `${hours}:${mins}`;
+    }
+    
+    // 否则显示日期+时间
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    return `${month}-${day} ${hours}:${mins}`;
+}
+
+/**
+ * HTML转义
+ */
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+/**
+ * 加载在线用户列表
+ */
+async function loadChatUsers() {
+    try {
+        const res = await fetch(`${API_BASE}/chat/users`);
+        const users = await res.json();
+        
+        renderChatUsers(users);
+        
+        // 更新在线人数
+        const countEl = document.getElementById('chat-online-count');
+        if (countEl) countEl.textContent = `(${users.length})`;
+        
+        const homeCountEl = document.getElementById('home-chat-user-count');
+        if (homeCountEl) homeCountEl.textContent = `(${users.length}人在线)`;
+    } catch(e) {
+        console.error('加载在线用户失败:', e);
+    }
+}
+
+/**
+ * 渲染在线用户列表
+ */
+function renderChatUsers(users) {
+    const container = document.getElementById('chat-user-list');
+    if (!container) return;
+    
+    if (users.length === 0) {
+        container.innerHTML = '<div class="empty-hint">暂无用户</div>';
+        return;
+    }
+    
+    container.innerHTML = users.map(u => {
+        const initial = u.name.charAt(0);
+        const isGuest = u.is_guest;
+        return `
+            <div class="chat-user-item">
+                <div class="chat-user-avatar ${isGuest ? 'guest' : ''}">${initial}</div>
+                <span class="chat-user-name ${isGuest ? 'guest' : ''}">${u.name}</span>
+            </div>
+        `;
+    }).join('');
+}
+
+/**
+ * 加载聊天室状态
+ */
+async function loadChatStatus() {
+    try {
+        const res = await fetch(`${API_BASE}/chat/status`);
+        const status = await res.json();
+        
+        const memoryEl = document.getElementById('chat-memory-usage');
+        const msgCountEl = document.getElementById('chat-msg-count');
+        const guestSlotsEl = document.getElementById('chat-guest-slots');
+        const maxUsersEl = document.getElementById('chat-max-users');
+        
+        if (memoryEl) {
+            const usedKB = (status.memory_used / 1024).toFixed(1);
+            const limitKB = (status.memory_limit / 1024).toFixed(0);
+            memoryEl.textContent = `${usedKB}KB / ${limitKB}KB`;
+        }
+        if (msgCountEl) msgCountEl.textContent = status.message_count;
+        if (guestSlotsEl) guestSlotsEl.textContent = `${status.guest_count}/${status.guest_max}人`;
+        if (maxUsersEl) maxUsersEl.textContent = `${status.user_count}/${status.max_users}人`;
+    } catch(e) {
+        console.error('加载聊天室状态失败:', e);
+    }
+}
+
+/**
+ * 更新字符计数
+ */
+function updateChatCharCount() {
+    const input = document.getElementById('chat-input');
+    const countEl = document.getElementById('chat-char-count');
+    if (!input || !countEl) return;
+    
+    const len = input.value.length;
+    countEl.textContent = `${len}/${CHAT_MAX_CHARS}`;
+    
+    countEl.classList.remove('warning', 'danger');
+    if (len >= CHAT_MAX_CHARS) {
+        countEl.classList.add('danger');
+    } else if (len >= CHAT_MAX_CHARS * 0.8) {
+        countEl.classList.add('warning');
+    }
+}
+
+/**
+ * 更新聊天室发送按钮状态
+ */
+function updateChatSendBtn() {
+    const input = document.getElementById('chat-input');
+    const btn = document.getElementById('chat-send-btn');
+    if (input && btn) {
+        btn.disabled = !input.value.trim();
+    }
+    updateChatCharCount();
+}
+
+/**
+ * 发送聊天消息
+ */
+async function sendChatMessage() {
+    const input = document.getElementById('chat-input');
+    const sendBtn = document.getElementById('chat-send-btn');
+    if (!input) return;
+    
+    const content = input.value.trim();
+    if (!content) return;
+    
+    if (content.length > CHAT_MAX_CHARS) {
+        alert(`消息过长，最多${CHAT_MAX_CHARS}个字符`);
+        return;
+    }
+    
+    // 立即禁用按钮防止重复发送
+    if (sendBtn) sendBtn.disabled = true;
+    
+    // 如果未加入聊天室，先加入
+    if (!_chatJoined) {
+        await joinChat();
+        if (!_chatJoined) {
+            updateChatSendBtn();
+            return;
+        }
+    }
+    
+    try {
+        const res = await fetchWithAuth(`${API_BASE}/chat/send`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                content: content,
+                user_id: _chatUserId
+            })
+        });
+        
+        if (res.ok) {
+            const msg = await res.json();
+            // 清空输入框
+            input.value = '';
+            // 追加消息
+            appendChatMessages([msg]);
+            _chatLastMsgId = msg.id;
+        } else {
+            const err = await res.json().catch(() => ({}));
+            alert(err.error || '发送失败');
+        }
+    } catch(e) {
+        console.error('发送消息失败:', e);
+        alert('发送失败，请重试');
+    }
+    // 更新按钮状态（清空后会自动禁用）
+    updateChatSendBtn();
+}
+
+/**
+ * 更新首页聊天预览
+ */
+function updateHomeChatPreview(messages) {
+    const container = document.getElementById('home-chat-preview');
+    if (!container) return;
+    
+    // 显示最近10条消息
+    const recent = messages.slice(-10);
+    if (recent.length === 0) {
+        container.innerHTML = '<div class="empty-hint">暂无消息，快来说点什么吧</div>';
+        return;
+    }
+    
+    container.innerHTML = recent.map(m => {
+        // 判断是否是当前用户发送的消息：优先使用_chatUserId，回退到currentUser.id
+        const isSelf = m.user_id === _chatUserId || (currentUser && m.user_id === currentUser.id);
+        const timeStr = formatMessageTime(m.timestamp);
+        let classes = 'chat-message';
+        if (isSelf) classes += ' is-self';
+        if (m.is_guest) classes += ' is-guest';
+        return `
+        <div class="${classes}">
+            <div class="chat-message-header">
+                <span class="chat-message-user ${m.is_guest ? 'guest' : ''}">${m.user_name}</span>
+                <span class="chat-message-time">${timeStr}</span>
+            </div>
+            <div class="chat-message-content">${escapeHtml(m.content)}</div>
+        </div>
+    `;
+    }).join('');
+    
+    // 滚动到底部
+    container.scrollTop = container.scrollHeight;
+}
+
+/**
+ * 加载首页聊天预览（增量加载机制）
+ */
+async function loadHomeChatPreview() {
+    try {
+        // 增量加载消息
+        const msgRes = await fetch(`${API_BASE}/chat/messages?after=${_homeChatLastMsgId}`);
+        const newMessages = await msgRes.json();
+        
+        if (newMessages.length > 0) {
+            // 追加新消息到缓存
+            _homeChatMessages = _homeChatMessages.concat(newMessages);
+            // 只保留最近50条消息避免内存占用
+            if (_homeChatMessages.length > 50) {
+                _homeChatMessages = _homeChatMessages.slice(-50);
+            }
+            _homeChatLastMsgId = Math.max(...newMessages.map(m => m.id));
+            updateHomeChatPreview(_homeChatMessages);
+        } else if (_homeChatLastMsgId > 0) {
+            // 增量返回空且有旧ID，检测服务器是否重启
+            const checkRes = await fetch(`${API_BASE}/chat/messages?after=0`);
+            const allMessages = await checkRes.json();
+            if (allMessages.length === 0 || (allMessages.length > 0 && allMessages[allMessages.length - 1].id < _homeChatLastMsgId)) {
+                // 服务器消息已重置，全量重载
+                _homeChatLastMsgId = 0;
+                _homeChatMessages = allMessages;
+                if (allMessages.length > 0) {
+                    _homeChatLastMsgId = Math.max(...allMessages.map(m => m.id));
+                }
+                updateHomeChatPreview(_homeChatMessages);
+            }
+        } else if (_homeChatMessages.length === 0) {
+            // 首次加载且无消息
+            updateHomeChatPreview([]);
+        }
+        
+        // 加载在线用户数
+        const userRes = await fetch(`${API_BASE}/chat/users`);
+        const users = await userRes.json();
+        const homeCountEl = document.getElementById('home-chat-user-count');
+        if (homeCountEl) homeCountEl.textContent = `(${users.length}人在线)`;
+    } catch(e) {
+        console.error('加载首页聊天预览失败:', e);
+    }
+}
+
+/**
+ * 启动首页聊天定时刷新（每分钟）
+ */
+function startHomeChatPolling() {
+    if (_homeChatTimer) return;
+    _homeChatTimer = setInterval(() => {
+        loadHomeChatPreview();
+    }, HOME_CHAT_INTERVAL);
+}
+
+/**
+ * 停止首页聊天定时刷新
+ */
+function stopHomeChatPolling() {
+    if (_homeChatTimer) {
+        clearInterval(_homeChatTimer);
+        _homeChatTimer = null;
+    }
+}
+
+/**
+ * 检查聊天功能是否启用，并控制首页聊天区域显示
+ */
+async function checkChatEnabledAndLoad() {
+    try {
+        const res = await fetch(`${API_BASE}/settings/system`);
+        if (res.ok) {
+            const data = await res.json();
+            const chatEnabled = data.chat_enabled !== false;
+            
+            // 控制首页聊天卡片显示（使用classList保留CSS原有布局）
+            const homeChatCard = document.querySelector('.home-chat-card');
+            if (homeChatCard) {
+                homeChatCard.classList.toggle('hidden', !chatEnabled);
+            }
+            
+            // 控制导航栏摆龙门阵链接显示
+            const chatNavLinks = document.querySelectorAll('nav a[onclick*="showSection(\'chat\')"]');
+            chatNavLinks.forEach(link => {
+                link.classList.toggle('hidden', !chatEnabled);
+            });
+            
+            // 只有在启用时才加载聊天预览
+            if (chatEnabled) {
+                loadHomeChatPreview();
+                startHomeChatPolling();
+            } else {
+                stopHomeChatPolling();
+            }
+        }
+    } catch(e) {
+        console.error('检查聊天功能状态失败:', e);
+        // 失败时默认显示聊天功能
+        loadHomeChatPreview();
+        startHomeChatPolling();
+    }
+}
+
+/**
+ * 更新首页聊天发送按钮状态
+ */
+function updateHomeChatSendBtn() {
+    const input = document.getElementById('home-chat-input');
+    const btn = document.getElementById('home-chat-send-btn');
+    if (input && btn) {
+        btn.disabled = !input.value.trim();
+    }
+}
+
+/**
+ * 从首页发送聊天消息
+ */
+async function sendHomeChatMessage() {
+    const input = document.getElementById('home-chat-input');
+    const sendBtn = document.getElementById('home-chat-send-btn');
+    if (!input) return;
+    
+    const content = input.value.trim();
+    if (!content) return;
+    
+    if (content.length > CHAT_MAX_CHARS) {
+        alert(`消息过长，最多${CHAT_MAX_CHARS}个字符`);
+        return;
+    }
+    
+    // 立即禁用按钮防止重复发送
+    if (sendBtn) sendBtn.disabled = true;
+    
+    // 如果未加入聊天室，先加入
+    if (!_chatJoined) {
+        const joined = await joinChat();
+        if (!joined) {
+            updateHomeChatSendBtn();
+            return;
+        }
+    }
+    
+    try {
+        const res = await fetchWithAuth(`${API_BASE}/chat/send`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                content: content,
+                user_id: _chatUserId
+            })
+        });
+        
+        if (res.ok) {
+            const msg = await res.json();
+            // 清空输入框
+            input.value = '';
+            // 刷新首页预览
+            await loadHomeChatPreview();
+        } else {
+            const err = await res.json().catch(() => ({}));
+            alert(err.error || '发送失败');
+        }
+    } catch(e) {
+        console.error('发送消息失败:', e);
+        alert('发送失败，请重试');
+    }
+    // 更新按钮状态（清空后会自动禁用）
+    updateHomeChatSendBtn();
 }
