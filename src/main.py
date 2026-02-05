@@ -832,6 +832,8 @@ def style(request): return send_file('static/style.css')
 def app_js(request): return send_file('static/app.js')
 @app.route('/static/logo.png')
 def logo_png(request): return send_file('static/logo.png')
+@app.route('/static/marked.umd.js')
+def marked_js(request): return send_file('static/marked.umd.js')
 
 # --- Poems API ---
 @api_route('/api/poems', methods=['GET'])
@@ -1045,6 +1047,37 @@ def create_task(request):
     }
     db_tasks.append(task)
     return task
+
+@api_route('/api/tasks/update', methods=['POST'])
+@require_permission(ROLE_DIRECTOR)
+def update_task(request):
+    """更新任务（仅理事及以上权限）"""
+    data = request.json
+    if not data: return Response('Invalid', 400)
+    
+    tid = data.get('id')
+    if not tid:
+        return Response('{"error": "缺少任务ID"}', 400, {'Content-Type': 'application/json'})
+    
+    updated = False
+    
+    def task_updater(t):
+        nonlocal updated
+        # 更新可修改字段
+        if 'title' in data and data['title']:
+            t['title'] = data['title']
+        if 'description' in data:
+            t['description'] = data['description']
+        if 'reward' in data:
+            t['reward'] = int(data['reward']) if data['reward'] else 0
+        updated = True
+        return t
+    
+    db_tasks.update(tid, task_updater)
+    
+    if updated:
+        return {'success': True}
+    return Response('{"error": "任务不存在"}', 404, {'Content-Type': 'application/json'})
 
 @api_route('/api/tasks/claim', methods=['POST'])
 @require_login

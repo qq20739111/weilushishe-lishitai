@@ -615,6 +615,9 @@ button:disabled {
     color: #2d3436;
     font-family: "Georgia", serif; /* Serif for poems looks better */
 }
+.poem-body.markdown-content {
+    white-space: normal; /* Markdown 自带换行处理，取消 pre-wrap */
+}
 .poem-meta { 
     display: flex;
     justify-content: space-between;
@@ -649,6 +652,8 @@ button:disabled {
     padding: 30px; 
     width: 90%; 
     max-width: 500px; 
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
     border-radius: 16px; 
     box-shadow: 0 15px 40px rgba(0,0,0,0.2);
     animation: slideUp 0.3s;
@@ -799,6 +804,8 @@ button:disabled {
 .home-row-1 .home-card {
     display: flex;
     flex-direction: column;
+    min-width: 0; /* 强制三列等宽，防止内容撑开 */
+    margin-bottom: 0; /* 清除card默认margin，由grid gap统一控制间距 */
 }
 
 .home-row-1 .home-card h3 {
@@ -1403,9 +1410,13 @@ button:disabled {
 .home-row-2 {
     display: flex;
     gap: 20px;
-    margin-top: 20px;
+    margin-top: 20px; /* 与home-row-1的gap保持一致 */
     align-items: stretch;
     min-height: 350px;
+}
+
+.home-row-2 > .card {
+    margin-bottom: 0; /* 清除card默认margin，由flex gap统一控制间距 */
 }
 
 .home-daily-card {
@@ -1423,7 +1434,7 @@ button:disabled {
 }
 
 .card.home-chat-card {
-    flex: 2;
+    flex: 2.25;
     min-width: 280px;
     display: flex;
     flex-direction: column;
@@ -1810,4 +1821,152 @@ button:disabled {
     text-transform: uppercase;
     letter-spacing: 0.5px;
     margin-bottom: 12px;
+}
+
+/* ==================== Markdown 内容样式 ==================== */
+.markdown-content {
+    line-height: 1.8;
+    word-break: break-word;
+    color: #333;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
+    margin: 0.6em 0 0.4em;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.markdown-content h1 { font-size: 1.5em; }
+.markdown-content h2 { font-size: 1.3em; }
+.markdown-content h3 { font-size: 1.15em; }
+.markdown-content h4 { font-size: 1.05em; }
+
+.markdown-content p {
+    margin: 1em 0;
+}
+
+.markdown-content p.empty-line {
+    margin: 0;
+    line-height: 1.2;
+}
+
+.markdown-content blockquote {
+    border-left: 3px solid var(--accent);
+    padding-left: 12px;
+    margin: 0.8em 0;
+    color: #666;
+    font-style: italic;
+}
+
+.markdown-content code {
+    background: #f5f5f5;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.9em;
+}
+
+.markdown-content pre {
+    background: #f5f5f5;
+    padding: 12px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 0.8em 0;
+}
+
+.markdown-content pre code {
+    background: none;
+    padding: 0;
+}
+
+.markdown-content hr {
+    border: none;
+    border-top: 1px solid #ddd;
+    margin: 1em 0;
+}
+
+.markdown-content a {
+    color: var(--primary-color);
+    text-decoration: underline;
+}
+
+.markdown-content a:hover {
+    opacity: 0.8;
+}
+
+.markdown-content img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 6px;
+    margin: 0.5em 0;
+}
+
+.markdown-content table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1em 0;
+    font-size: 0.95em;
+}
+
+.markdown-content th,
+.markdown-content td {
+    border: 1px solid #ddd;
+    padding: 8px 12px;
+    text-align: left;
+}
+
+.markdown-content th {
+    background: #f5f5f5;
+    font-weight: 600;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+    padding-left: 1.5em;
+    margin: 0.5em 0;
+}
+
+.markdown-content li {
+    margin: 0.3em 0;
+}
+
+.markdown-content del {
+    text-decoration: line-through;
+    color: #999;
+}
+
+.markdown-content strong {
+    font-weight: 600;
+}
+
+.markdown-content em {
+    font-style: italic;
+}
+
+/* 任务列表复选框 */
+.markdown-content input[type="checkbox"] {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    min-width: 12px;
+    padding: 0;
+    margin: 0 5px 0 0;
+    border: 1.5px solid var(--text);
+    border-radius: 2px;
+    vertical-align: middle;
+    cursor: pointer;
+    background: #fff;
+    display: inline-block;
+}
+
+.markdown-content input[type="checkbox"]:checked {
+    background: var(--accent);
+    border-color: var(--accent);
 }

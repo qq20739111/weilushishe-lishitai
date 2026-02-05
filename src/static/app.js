@@ -876,10 +876,10 @@ function renderPoems() {
         return `
         <div class="card poem-card" style="${p.isLocal ? 'border-left: 4px solid #FFA000;' : ''}">
             <div style="display:flex; justify-content:space-between; align-items:start;">
-                <h3>${p.title}</h3>
+                <h3>${escapeHtml(p.title)}</h3>
                 ${p.isLocal ? '<span style="background:#FFA000; color:white; padding:2px 6px; border-radius:4px; font-size:0.7em;">草稿 (存储在本地)</span>' : ''}
             </div>
-            <div class="poem-body">${p.content}</div>
+            <div class="poem-body markdown-content">${renderMarkdown(p.content)}</div>
             <div class="poem-meta" style="align-items:center;">
                 <div style="display:flex; align-items:center; flex-wrap:wrap; gap:10px;">
                     <span style="${getPoemTypeStyle(p.type)} padding:2px 8px; border-radius:4px; font-size:0.85em;">${p.type}</span>
@@ -1140,16 +1140,18 @@ function getDisplayNameById(memberId) {
  * @returns {string} 显示名称
  */
 function getSmartDisplayName(memberId, fallbackName) {
+    let result = '';
     if (memberId) {
         const name = getDisplayNameById(memberId);
-        if (name) return name;
+        if (name) result = name;
     }
     // 回退：尝试通过名称查找成员（可能是老数据存储的是alias）
-    if (fallbackName) {
+    if (!result && fallbackName) {
         const member = _cachedMembers.find(m => m.name === fallbackName || m.alias === fallbackName);
-        if (member) return member.alias || member.name;
+        if (member) result = member.alias || member.name;
     }
-    return fallbackName || '';
+    if (!result) result = fallbackName || '';
+    return escapeHtml(result);
 }
 
 function editMemberClick(id) {
@@ -1252,8 +1254,8 @@ async function fetchMembers() {
             // 未登录用户只看到雅号和围炉值
             return `
             <div class="member-card">
-                <div class="member-avatar">${displayName.charAt(0)}</div>
-                <h4>${displayName}</h4>
+                <div class="member-avatar">${escapeHtml(displayName.charAt(0))}</div>
+                <h4>${escapeHtml(displayName)}</h4>
                 <div style="margin: 10px 0;">
                     <span class="points-badge">${m.points || 0} ${getPointsName()}</span>
                 </div>
@@ -1264,10 +1266,10 @@ async function fetchMembers() {
         // 登录用户看到完整信息
         return `
         <div class="member-card">
-            <div class="member-avatar">${displayName.charAt(0)}</div>
-            <h4>${displayName}</h4>
+            <div class="member-avatar">${escapeHtml(displayName.charAt(0))}</div>
+            <h4>${escapeHtml(displayName)}</h4>
             <div class="member-role">
-                ${m.alias ? m.name : ''}<br>
+                ${m.alias ? escapeHtml(m.name) : ''}<br>
                 <small>${formatRole(m.role)}</small>
             </div>
             <div style="margin: 10px 0;">
@@ -1501,11 +1503,11 @@ async function fetchFinance() {
         tbody.innerHTML = records.map(r => `
         <tr>
             <td>${r.date}</td>
-            <td>${r.summary}<br><small>${r.category}</small></td>
+            <td>${escapeHtml(r.summary)}<br><small>${escapeHtml(r.category)}</small></td>
             <td class="money ${r.type === 'income' ? 'plus' : 'minus'}">
                 ${r.type === 'income' ? '+' : '-'}${r.amount}
             </td>
-            <td>${r.handler}</td>
+            <td>${escapeHtml(r.handler)}</td>
         </tr>
     `).join('');
     } catch(e) {
@@ -1607,11 +1609,17 @@ async function fetchTasks() {
                 deleteBtn = `<button onclick="deleteTask(${t.id})" class="btn-delete" style="margin-left:10px;">删除</button>`;
             }
             
+            // 编辑按钮（仅理事及以上权限）
+            let editBtn = '';
+            if(isManager) {
+                editBtn = `<button onclick="openTaskModal(${t.id})" class="btn-edit" style="margin-left:10px; background:#2196F3;">编辑</button>`;
+            }
+            
             return `
             <div class="card task-item">
                 <div>
-                    <h4>${t.title} <span class="task-status ${statusInfo.className}">${statusInfo.label}</span></h4>
-                    <p>${t.description || ''}</p>
+                    <h4>${escapeHtml(t.title)} <span class="task-status ${statusInfo.className}">${statusInfo.label}</span></h4>
+                    <div class="markdown-content">${renderMarkdown(t.description || '')}</div>
                     <small>
                         奖励: <span class="task-reward">${t.reward}</span> ${pointsName}
                         ${t.creator ? `&nbsp;|&nbsp;发布者: ${getSmartDisplayName(t.creator_id, t.creator)}` : ''}
@@ -1620,6 +1628,7 @@ async function fetchTasks() {
                 </div>
                 <div style="display:flex; align-items:center;">
                     ${actionButtons}
+                    ${editBtn}
                     ${deleteBtn}
                 </div>
             </div>
@@ -1641,17 +1650,15 @@ function getTaskStatusInfo(status) {
     return statusMap[status] || { label: status, className: '' };
 }
 
-async function openTaskModal() {
-    document.getElementById('task-modal-title').innerText = '发布事务';
-    document.getElementById('t-title').value = '';
-    document.getElementById('t-description').value = '';
-    document.getElementById('t-reward').value = '';
-    document.getElementById('t-reward').placeholder = `奖励${getPointsName()}`;
+// 编辑任务时存储任务ID
+let _editingTaskId = null;
+
+async function openTaskModal(taskId = null) {
+    _editingTaskId = taskId;
     
     // 加载社员列表到指派下拉框
     const assigneeSelect = document.getElementById('t-assignee');
     if(assigneeSelect) {
-        // 先尝试获取社员列表
         if(_cachedMembers.length === 0) {
             try {
                 const res = await fetch(`${API_BASE}/members`);
@@ -1663,6 +1670,27 @@ async function openTaskModal() {
             _cachedMembers.map(m => `<option value="${m.name}">${m.alias || m.name}</option>`).join('');
     }
     
+    if(taskId) {
+        // 编辑模式：从缓存中查找任务并填充表单
+        document.getElementById('task-modal-title').innerText = '编辑事务';
+        const task = _cachedTasks.find(t => t.id === taskId);
+        if(task) {
+            document.getElementById('t-title').value = task.title || '';
+            document.getElementById('t-description').value = task.description || '';
+            document.getElementById('t-reward').value = task.reward || '';
+            // 编辑模式下隐藏指派选择（已有状态不应修改指派）
+            if(assigneeSelect) assigneeSelect.style.display = 'none';
+        }
+    } else {
+        // 新建模式
+        document.getElementById('task-modal-title').innerText = '发布事务';
+        document.getElementById('t-title').value = '';
+        document.getElementById('t-description').value = '';
+        document.getElementById('t-reward').value = '';
+        if(assigneeSelect) assigneeSelect.style.display = '';
+    }
+    
+    document.getElementById('t-reward').placeholder = `奖励${getPointsName()}`;
     toggleModal('modal-task');
 }
 
@@ -1670,42 +1698,64 @@ async function submitTask() {
     const title = document.getElementById('t-title').value.trim();
     const description = document.getElementById('t-description').value.trim();
     const reward = parseInt(document.getElementById('t-reward').value) || 0;
-    const assignee = document.getElementById('t-assignee')?.value || '';
     
     if(!title) { alert('请填写事务标题'); return; }
     
     try {
-        // 获取assignee的ID（如果有指派）
-        let assigneeId = null;
-        if (assignee) {
-            const assigneeMember = _cachedMembers.find(m => m.name === assignee);
-            assigneeId = assigneeMember ? assigneeMember.id : null;
-        }
-        
-        const res = await fetch(`${API_BASE}/tasks`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(withToken({
-                title,
-                description,
-                reward,
-                creator: currentUser.alias || currentUser.name,
-                creator_id: currentUser.id,  // 存储创建者ID用于动态查找
-                assignee: assignee || null,
-                assignee_id: assigneeId  // 存储领取者ID用于动态查找
-            }))
-        });
-        
-        if(res.ok) {
-            toggleModal('modal-task');
-            fetchTasks();
-            if(assignee) {
-                alert(`事务已派发给 ${assignee}！`);
+        if(_editingTaskId) {
+            // 更新模式
+            const res = await fetch(`${API_BASE}/tasks/update`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(withToken({
+                    id: _editingTaskId,
+                    title,
+                    description,
+                    reward
+                }))
+            });
+            
+            if(res.ok) {
+                toggleModal('modal-task');
+                fetchTasks();
+                alert('事务更新成功！');
             } else {
-                alert('事务发布成功！');
+                alert('更新失败');
             }
         } else {
-            alert('发布失败');
+            // 新建模式
+            const assignee = document.getElementById('t-assignee')?.value || '';
+            let assigneeId = null;
+            if (assignee) {
+                const assigneeMember = _cachedMembers.find(m => m.name === assignee);
+                assigneeId = assigneeMember ? assigneeMember.id : null;
+            }
+            
+            const res = await fetch(`${API_BASE}/tasks`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(withToken({
+                    title,
+                    description,
+                    reward,
+                    creator: currentUser.alias || currentUser.name,
+                    creator_id: currentUser.id,
+                    assignee: assignee || null,
+                    assignee_id: assigneeId
+                }))
+            });
+            
+            if(res.ok) {
+                toggleModal('modal-task');
+                fetchTasks();
+                if(assignee) {
+                    alert(`事务已派发给 ${assignee}！`);
+                } else {
+                    alert('事务发布成功！');
+                }
+            } else {
+                alert('发布失败');
+            }
         }
     } catch(e) {
         console.error(e);
@@ -1940,15 +1990,15 @@ async function fetchActivities() {
         container.innerHTML = _cachedActivities.map(a => `
             <div class="card" onclick="openActivityDetailView(${a.id})" style="cursor:pointer; margin-bottom:20px; transition:all 0.2s;">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
-                     <h3 style="margin:0; font-size:1.2rem; line-height:1.4; flex:1; padding-right:12px;">${a.title}</h3>
+                     <h3 style="margin:0; font-size:1.2rem; line-height:1.4; flex:1; padding-right:12px;">${escapeHtml(a.title)}</h3>
                      <span class="points-badge" style="${getStatusStyle(a.status)}; margin-top:2px; float:none; flex-shrink:0; white-space:nowrap;">${a.status}</span>
                 </div>
                 <div style="color:#444; margin-bottom:15px; line-height:1.6; max-height:4.8em; overflow:hidden; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical;">
-                    ${a.desc || ''}
+                    ${escapeHtml(a.desc || '')}
                 </div>
                 <div style="font-size:0.9em; color:#999; border-top:1px solid #eee; padding-top:10px; display:flex; justify-content:space-between; align-items:center;">
                     <span style="flex-shrink:0; margin-right:10px;">${formatDate(a.date)}</span>
-                    <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right;">${a.location || '线上'}</span>
+                    <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right;">${escapeHtml(a.location || '线上')}</span>
                 </div>
             </div>
         `).join('');
@@ -2182,14 +2232,14 @@ async function openActivityDetailView(id) {
                 </div>
                 <div style="margin-bottom:8px; display:flex;">
                     <span style="color:#666; width:80px; flex-shrink:0;">活动地点</span>
-                    <span>${act.location || '线上'}</span>
+                    <span>${escapeHtml(act.location || '线上')}</span>
                 </div>
                 <div style="display:flex;">
                     <span style="color:#666; width:80px; flex-shrink:0;">发布人</span>
                     <span>${getSmartDisplayName(act.publisher_id, act.publisher) || '未知'}</span>
                 </div>
             </div>
-            <div style="white-space:pre-wrap; line-height:1.8; color:#333; font-size:1.05rem;">${(act.desc || '（暂无详情）').trim()}</div>
+            <div class="markdown-content">${renderMarkdown((act.desc || '（暂无详情）').trim())}</div>
         `;
         
         const statusEl = document.getElementById('view-act-status');
@@ -2354,8 +2404,8 @@ async function loadSystemInfo() {
         const p = await pRes.json();
         if(p && p.title) {
             document.getElementById('daily-poem').innerHTML = `
-                <h4>${p.title}</h4>
-                <p style="white-space: pre-wrap;">${p.content}</p>
+                <h4>${escapeHtml(p.title)}</h4>
+                <div class="markdown-content">${renderMarkdown(p.content)}</div>
                 <small>—— ${getSmartDisplayName(p.author_id, p.author)}</small>
             `;
         } else {
@@ -2372,8 +2422,7 @@ async function loadSystemInfo() {
                 
                 // Filter not '已结束', Sort by date ASC (soonest first), Take 3
                 const upcoming = activities
-                    .filter(a => a.status !== '已结束')
-                    .sort((a, b) => new Date(a.date) - new Date(b.date))
+                    .sort((a, b) => new Date(b.date) - new Date(a.date))
                     .slice(0, 3);
                 
                 if(upcoming.length === 0) {
@@ -2382,10 +2431,10 @@ async function loadSystemInfo() {
                     homeActList.innerHTML = upcoming.map(a => `
                         <div onclick="openActivityDetailView(${a.id})" style="border-bottom: 1px solid #eee; padding: 12px 0; display:flex; justify-content:space-between; align-items:center; cursor:pointer;" class="clickable-item">
                             <div style="flex: 1; min-width: 0; padding-right: 10px;">
-                                <strong style="font-size:1.1em; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${a.title}</strong>
+                                <strong style="font-size:1.1em; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(a.title)}</strong>
                                 <div style="font-size:0.85em; color:#999; margin-top:6px;">
                                     <span style="margin-right:12px;">${formatDate(a.date)}</span>
-                                    <span>${a.location || '线上'}</span>
+                                    <span>${escapeHtml(a.location || '线上')}</span>
                                 </div>
                             </div>
                             <span class="points-badge" style="${getStatusStyle(a.status)}; margin:0; float:none; flex-shrink:0;">${a.status}</span>
@@ -2428,9 +2477,9 @@ async function loadLatestPoems() {
         
         container.innerHTML = poems.map(p => `
             <div style="border-bottom:1px solid #eee; padding:10px 0; cursor:pointer;" onclick="showSection('poems')">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <strong style="font-size:1em;">${p.title}</strong>
-                    <span style="${getPoemTypeStyle(p.type)} padding:2px 6px; border-radius:4px; font-size:0.75em;">${p.type}</span>
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                    <strong style="font-size:1em; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(p.title)}</strong>
+                    <span style="${getPoemTypeStyle(p.type)} padding:2px 6px; border-radius:4px; font-size:0.75em; flex-shrink:0;">${escapeHtml(p.type)}</span>
                 </div>
                 <div style="font-size:0.85em; color:#888; margin-top:4px;">${getSmartDisplayName(p.author_id, p.author)}</div>
             </div>
@@ -2471,7 +2520,7 @@ async function loadPointsRanking() {
             <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #eee;">
                 <div style="display:flex; align-items:center; gap:10px;">
                     <span style="font-size:${i < 3 ? '1.2em' : '0.9em'}; min-width:24px; text-align:center;">${medals[i]}</span>
-                    <span style="font-weight:${i < 3 ? '600' : '400'};">${m.alias || m.name}</span>
+                    <span style="font-weight:${i < 3 ? '600' : '400'};">${escapeHtml(m.alias || m.name)}</span>
                 </div>
                 <span class="points-badge" title="年度新增${pointsName}">❤️‍🔥 +${m.yearly_points || 0}</span>
             </div>
@@ -2525,11 +2574,15 @@ async function handleGlobalSearch(term) {
 
     try {
         // SERVER SIDE SEARCH for Scalability
+        // 事务搜索仅对已登录用户开放，使用 fetchWithAuth 自动带上 token
+        const tasksPromise = currentUser 
+            ? fetchWithAuth(`${API_BASE}/tasks?page=1&limit=20&q=${encodeURIComponent(term)}`).then(r => r.ok ? r.json() : {data:[]}).catch(()=>({data:[]}))
+            : Promise.resolve({data: []});
+        
         const [poems, activities, tasksRes] = await Promise.all([
             fetch(`${API_BASE}/poems?limit=20&q=${encodeURIComponent(term)}`).then(r=>r.json()).catch(()=>[]),
             fetch(`${API_BASE}/activities?limit=20&q=${encodeURIComponent(term)}`).then(r=>r.json()).catch(()=>[]),
-            // Tasks 也使用服务端搜索
-            fetch(`${API_BASE}/tasks?page=1&limit=20&q=${encodeURIComponent(term)}`).then(r=>r.json()).catch(()=>({data:[]}))
+            tasksPromise
         ]);
         
         // Race Condition Check: If a newer request has started, ignore this result
@@ -3630,6 +3683,33 @@ function escapeHtml(text) {
 }
 
 /**
+ * Markdown 渲染函数
+ * 使用 marked.js 将 Markdown 文本转换为 HTML
+ */
+function renderMarkdown(text) {
+    if (!text) return '';
+    
+    // 配置 marked
+    marked.setOptions({
+        gfm: true,        // GitHub Flavored Markdown（表格、删除线、任务列表）
+        breaks: true,     // 换行转 <br>（适合诗歌格式）
+        pedantic: false,
+        async: false
+    });
+    
+    try {
+        let html = marked.parse(text);
+        // 后处理：将空段落转为带空行效果的 <br>
+        // 保留连续空行效果：将 <p><br></p> 或 <p></p> 替换为带高度的空行
+        html = html.replace(/<p>\s*<br\s*\/?>\s*<\/p>/gi, '<p class="empty-line">&nbsp;</p>');
+        return html;
+    } catch (e) {
+        console.error('Markdown parse error:', e);
+        return escapeHtml(text);  // 降级为纯文本
+    }
+}
+
+/**
  * 加载在线用户列表
  */
 async function loadChatUsers() {
@@ -3667,8 +3747,8 @@ function renderChatUsers(users) {
         const isGuest = u.is_guest;
         return `
             <div class="chat-user-item">
-                <div class="chat-user-avatar ${isGuest ? 'guest' : ''}">${initial}</div>
-                <span class="chat-user-name ${isGuest ? 'guest' : ''}">${u.name}</span>
+                <div class="chat-user-avatar ${isGuest ? 'guest' : ''}">${escapeHtml(initial)}</div>
+                <span class="chat-user-name ${isGuest ? 'guest' : ''}">${escapeHtml(u.name)}</span>
             </div>
         `;
     }).join('');

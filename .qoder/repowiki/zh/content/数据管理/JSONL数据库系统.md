@@ -2,21 +2,15 @@
 
 <cite>
 **本文档引用的文件**
-- [main.py](file://main.py)
-- [boot.py](file://boot.py)
-- [data/poems.jsonl](file://data/poems.jsonl)
-- [data/members.jsonl](file://data/members.jsonl)
-- [data/activities.jsonl](file://data/activities.jsonl)
-- [data/finance.jsonl](file://data/finance.jsonl)
-- [data/tasks.jsonl](file://data/tasks.jsonl)
-- [data/config.json](file://data/config.json)
-- [data/settings.json](file://data/settings.json)
-- [lib/WifiConnector.py](file://lib/WifiConnector.py)
-- [lib/SystemStatus.py](file://lib/SystemStatus.py)
-- [lib/BreathLED.py](file://lib/BreathLED.py)
-- [static/index.html](file://static/index.html)
-- [static/app.js](file://static/app.js)
-- [static/style.css](file://static/style.css)
+- [src/main.py](file://src/main.py)
+- [src/boot.py](file://src/boot.py)
+- [src/data/poems.jsonl](file://src/data/poems.jsonl)
+- [src/data/members.jsonl](file://src/data/members.jsonl)
+- [src/data/activities.jsonl](file://src/data/activities.jsonl)
+- [src/data/finance.jsonl](file://src/data/finance.jsonl)
+- [src/data/tasks.jsonl](file://src/data/tasks.jsonl)
+- [src/data/config.json](file://src/data/config.json)
+- [src/static/app.js](file://src/static/app.js)
 </cite>
 
 ## 目录
@@ -47,56 +41,44 @@ JSONL数据库系统是整个项目的核心数据存储层，采用纯文本文
 ```mermaid
 graph TB
 subgraph "应用根目录"
-A[main.py<br/>主应用入口]
-B[boot.py<br/>引导程序]
-C[static/<br/>前端资源]
-D[data/<br/>数据文件]
-E[lib/<br/>库文件]
+A[src/main.py<br/>主应用入口]
+B[src/boot.py<br/>引导程序]
+C[src/static/<br/>前端资源]
+D[src/data/<br/>数据文件]
 end
 subgraph "前端资源"
-F[index.html<br/>页面模板]
-G[app.js<br/>JavaScript逻辑]
-H[style.css<br/>样式表]
+E[index.html<br/>页面模板]
+F[app.js<br/>JavaScript逻辑]
+G[style.css<br/>样式表]
 end
 subgraph "数据文件"
-I[poems.jsonl<br/>诗歌数据]
-J[members.jsonl<br/>成员数据]
-K[activities.jsonl<br/>活动数据]
-L[finance.jsonl<br/>财务数据]
-M[tasks.jsonl<br/>任务数据]
-N[config.json<br/>配置文件]
-O[settings.json<br/>系统设置]
-end
-subgraph "库文件"
-P[WifiConnector.py<br/>WiFi连接管理]
-Q[SystemStatus.py<br/>系统状态LED]
-R[BreathLED.py<br/>LED呼吸效果]
+H[poems.jsonl<br/>诗歌数据]
+I[members.jsonl<br/>成员数据]
+J[activities.jsonl<br/>活动数据]
+K[finance.jsonl<br/>财务数据]
+L[tasks.jsonl<br/>任务数据]
+M[config.json<br/>配置文件]
 end
 A --> C
 A --> D
-A --> E
+C --> E
 C --> F
 C --> G
-C --> H
+D --> H
 D --> I
 D --> J
 D --> K
 D --> L
 D --> M
-D --> N
-D --> O
-E --> P
-E --> Q
-E --> R
 ```
 
 **图表来源**
-- [main.py](file://main.py#L1-L50)
-- [boot.py](file://boot.py#L1-L50)
+- [src/main.py](file://src/main.py#L1-L50)
+- [src/boot.py](file://src/boot.py#L1-L50)
 
 **章节来源**
-- [main.py](file://main.py#L1-L50)
-- [boot.py](file://boot.py#L1-L50)
+- [src/main.py](file://src/main.py#L1-L50)
+- [src/boot.py](file://src/boot.py#L1-L50)
 
 ## 核心组件
 
@@ -117,7 +99,7 @@ JsonlDB类是整个JSONL数据库系统的核心，采用面向对象的设计�
 - **原子操作**：更新和删除操作使用临时文件确保数据安全
 
 **章节来源**
-- [main.py](file://main.py#L53-L258)
+- [src/main.py](file://src/main.py#L218-L483)
 
 ## 架构概览
 
@@ -152,13 +134,11 @@ FS --> JL
 WS --> ESP
 API --> ESP
 DB --> ESP
-LED --> ESP
-WIFI --> ESP
 ```
 
 **图表来源**
-- [main.py](file://main.py#L17-L50)
-- [boot.py](file://boot.py#L1-L20)
+- [src/main.py](file://src/main.py#L49-L66)
+- [src/boot.py](file://src/boot.py#L1-L20)
 
 ## 详细组件分析
 
@@ -179,6 +159,8 @@ class JsonlDB {
 +update(id_val, update_func) bool
 +delete(id_val) bool
 +get_all() list
++iter_records() iterator
++count() int
 }
 class 文件操作 {
 +open(file, mode)
@@ -199,7 +181,7 @@ JsonlDB --> 数据处理 : "使用"
 ```
 
 **图表来源**
-- [main.py](file://main.py#L53-L258)
+- [src/main.py](file://src/main.py#L218-L483)
 
 #### CRUD操作实现详解
 
@@ -222,7 +204,7 @@ Note over DB,File : 单行追加写入，无需扫描文件
 ```
 
 **图表来源**
-- [main.py](file://main.py#L86-L94)
+- [src/main.py](file://src/main.py#L251-L259)
 
 ##### 2. Fetch_page操作（分页查询）
 
@@ -242,10 +224,11 @@ CalcPagination --> ReadTarget["读取目标行"]
 ReadTarget --> ParseJSON["解析JSON数据"]
 ParseJSON --> ReturnResult["返回结果"]
 SlowPath --> ScanFull["全文件扫描"]
-ScanFull --> SearchLoop["逐行搜索"]
-SearchLoop --> ParseLine["解析行数据"]
+SlowPath --> QuickCheck["快速检查：行中搜索"]
+QuickCheck --> ParseLine["解析行数据"]
 ParseLine --> CheckMatch["检查匹配条件"]
-CheckMatch --> |匹配| AddToResults["添加到结果集"]
+CheckMatch --> |匹配| PreciseMatch["精确匹配字段值"]
+PreciseMatch --> AddToResults["添加到结果集"]
 CheckMatch --> |不匹配| NextLine["下一行"]
 AddToResults --> NextLine
 NextLine --> |EOF| ReverseSlow["反转结果"]
@@ -257,7 +240,7 @@ ReturnSlow --> End
 ```
 
 **图表来源**
-- [main.py](file://main.py#L113-L185)
+- [src/main.py](file://src/main.py#L280-L378)
 
 ##### 3. Update操作（更新记录）
 
@@ -289,7 +272,7 @@ Note over DB : 原子性操作，要么全部成功，要么全部失败
 ```
 
 **图表来源**
-- [main.py](file://main.py#L187-L221)
+- [src/main.py](file://src/main.py#L380-L414)
 
 ##### 4. Delete操作（删除记录）
 
@@ -316,27 +299,32 @@ ReturnTrue --> End
 ```
 
 **图表来源**
-- [main.py](file://main.py#L223-L246)
+- [src/main.py](file://src/main.py#L416-L440)
 
-#### 分页查询算法
+#### 两阶段搜索算法
 
-分页查询是JsonlDB的核心功能之一，实现了高效的内存优化：
+**更新** 项目实现了内存高效的两阶段搜索算法，显著提升了搜索性能：
 
-**快速路径算法**：
-1. 首次扫描：记录所有非空行的文件偏移位置
-2. 内存存储：将偏移位置存储在内存数组中
-3. 排序处理：根据reverse参数决定顺序
-4. 分页提取：使用切片操作获取目标范围
-5. 精确读取：根据偏移位置精确读取目标行
+**第一阶段：偏移量扫描（快速路径）**
+- 首次扫描：记录所有非空行的文件偏移位置
+- 内存存储：将偏移位置存储在内存数组中
+- 排序处理：根据reverse参数决定顺序
+- 分页提取：使用切片操作获取目标范围
+- 精确读取：根据偏移位置精确读取目标行
 
-**慢速路径算法**：
-1. 全文件扫描：逐行读取文件内容
-2. 搜索匹配：对每条记录进行搜索条件检查
-3. 结果收集：将匹配的记录添加到结果数组
-4. 分页处理：对结果集进行分页操作
+**第二阶段：精确加载（智能加载）**
+- 只读取当前页需要的记录
+- 避免加载无关数据到内存
+- 最大化减少I/O操作次数
+
+**慢速路径优化**：
+1. **快速检查**：先在原始行中搜索（不解析JSON）
+2. **确认匹配**：解析JSON后精确匹配字段值
+3. **内存优化**：只存储匹配记录的偏移量
+4. **分页处理**：只解析当前页需要的记录
 
 **章节来源**
-- [main.py](file://main.py#L113-L185)
+- [src/main.py](file://src/main.py#L280-L378)
 
 ### 数据模型分析
 
@@ -363,11 +351,8 @@ ReturnTrue --> End
 - **状态管理**：open（开放）, completed（已完成）
 
 **章节来源**
-- [data/poems.jsonl](file://data/poems.jsonl#L1-L4)
-- [data/members.jsonl](file://data/members.jsonl#L1-L4)
-- [data/activities.jsonl](file://data/activities.jsonl#L1-L7)
-- [data/finance.jsonl](file://data/finance.jsonl#L1-L3)
-- [data/tasks.jsonl](file://data/tasks.jsonl#L1-L2)
+- [src/data/poems.jsonl](file://src/data/poems.jsonl#L1-L1)
+- [src/data/members.jsonl](file://src/data/members.jsonl#L1-L2)
 
 ### 文件存储机制
 
@@ -390,8 +375,8 @@ JSONL（JSON Lines）是一种简单的文件格式，每行包含一个JSON对�
 - **数据验证**：读取时进行JSON格式验证
 
 **章节来源**
-- [main.py](file://main.py#L86-L94)
-- [main.py](file://main.py#L187-L246)
+- [src/main.py](file://src/main.py#L251-L259)
+- [src/main.py](file://src/main.py#L380-L440)
 
 ### 内存优化策略
 
@@ -419,8 +404,8 @@ JsonlDB采用了多种内存优化策略：
 - **批量操作**：支持批量读取和写入操作
 
 **章节来源**
-- [main.py](file://main.py#L113-L185)
-- [main.py](file://main.py#L187-L246)
+- [src/main.py](file://src/main.py#L280-L378)
+- [src/main.py](file://src/main.py#L380-L440)
 
 ### 全文搜索实现
 
@@ -436,7 +421,8 @@ CheckFields --> |指定字段| FieldSearch["字段搜索"]
 CheckFields --> |全部字段| AllFields["全字段搜索"]
 FieldSearch --> IterateRecords["遍历记录"]
 AllFields --> IterateRecords
-IterateRecords --> ParseJSON["解析JSON"]
+IterateRecords --> QuickCheck["快速检查：行中搜索"]
+QuickCheck --> ParseJSON["解析JSON"]
 ParseJSON --> ExtractValues["提取字段值"]
 ExtractValues --> CompareValues["比较值"]
 CompareValues --> |匹配| AddResult["添加到结果"]
@@ -447,7 +433,7 @@ ReturnResults --> End([结束])
 ```
 
 **图表来源**
-- [main.py](file://main.py#L155-L185)
+- [src/main.py](file://src/main.py#L280-L378)
 
 #### 搜索优化策略
 - **大小写不敏感**：搜索前将查询条件和数据都转换为小写
@@ -455,7 +441,7 @@ ReturnResults --> End([结束])
 - **性能考虑**：对于大数据集，建议使用字段限定搜索
 
 **章节来源**
-- [main.py](file://main.py#L155-L185)
+- [src/main.py](file://src/main.py#L280-L378)
 
 ### 错误处理策略
 
@@ -472,8 +458,8 @@ JsonlDB实现了多层次的错误处理：
 - **状态检查**：操作前后检查文件状态确保一致性
 
 **章节来源**
-- [main.py](file://main.py#L86-L94)
-- [main.py](file://main.py#L187-L246)
+- [src/main.py](file://src/main.py#L251-L259)
+- [src/main.py](file://src/main.py#L380-L440)
 
 ### 数据迁移机制
 
@@ -497,7 +483,7 @@ SkipMigration --> End
 ```
 
 **图表来源**
-- [main.py](file://main.py#L68-L85)
+- [src/main.py](file://src/main.py#L233-L249)
 
 #### 迁移注意事项
 - **数据完整性**：确保迁移过程中数据不丢失
@@ -505,7 +491,7 @@ SkipMigration --> End
 - **版本兼容**：支持不同版本间的格式转换
 
 **章节来源**
-- [main.py](file://main.py#L68-L85)
+- [src/main.py](file://src/main.py#L233-L249)
 
 ## 依赖关系分析
 
@@ -514,7 +500,7 @@ SkipMigration --> End
 ```mermaid
 graph TB
 subgraph "核心依赖"
-A[main.py]
+A[src/main.py]
 B[JsonlDB类]
 C[Microdot Web框架]
 end
@@ -523,10 +509,8 @@ D[os模块]
 E[json模块]
 F[gc模块]
 G[time模块]
-end
-subgraph "硬件抽象"
-H[network模块]
-I[machine模块]
+H[machine模块]
+I[network模块]
 end
 subgraph "前端依赖"
 J[index.html]
@@ -539,6 +523,7 @@ N[members.jsonl]
 O[activities.jsonl]
 P[finance.jsonl]
 Q[tasks.jsonl]
+R[config.json]
 end
 A --> B
 A --> C
@@ -556,11 +541,12 @@ B --> N
 B --> O
 B --> P
 B --> Q
+B --> R
 ```
 
 **图表来源**
-- [main.py](file://main.py#L1-L16)
-- [boot.py](file://boot.py#L1-L12)
+- [src/main.py](file://src/main.py#L1-L16)
+- [src/boot.py](file://src/boot.py#L1-L12)
 
 ### 外部库依赖
 
@@ -577,10 +563,12 @@ B --> Q
 - **os**：文件系统操作
 - **gc**：垃圾回收控制
 - **time**：时间戳处理
+- **machine**：硬件抽象层
+- **network**：网络通信
 
 **章节来源**
-- [main.py](file://main.py#L1-L16)
-- [boot.py](file://boot.py#L1-L12)
+- [src/main.py](file://src/main.py#L1-L16)
+- [src/boot.py](file://src/boot.py#L1-L12)
 
 ## 性能考虑
 
@@ -681,8 +669,8 @@ print(f"[DB] Migrating {legacy_path} -> {self.filepath}")
 - **查询性能**：记录查询响应时间
 
 **章节来源**
-- [main.py](file://main.py#L86-L94)
-- [main.py](file://main.py#L84-L84)
+- [src/main.py](file://src/main.py#L251-L259)
+- [src/main.py](file://src/main.py#L380-L440)
 
 ### 数据恢复策略
 
@@ -718,6 +706,7 @@ TryAlternative --> VerifyBackup
 - **分页查询**：高效的分页机制支持大数据集
 - **原子操作**：临时文件机制确保数据一致性
 - **跨平台兼容**：支持MicroPython和标准Python环境
+- **两阶段搜索**：内存高效的两阶段搜索算法
 
 ### 应用价值
 该系统为小型Web应用提供了轻量级的数据存储解决方案，特别适用于：

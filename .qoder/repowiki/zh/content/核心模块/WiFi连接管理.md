@@ -2,15 +2,19 @@
 
 <cite>
 **本文引用的文件**
-- [WifiConnector.py](file://lib/WifiConnector.py)
-- [WifiConnector_README.md](file://lib/WifiConnector_README.md)
-- [WifiConnector_min.py](file://lib/WifiConnector_min.py)
-- [wifi_connector_example.py](file://lib/wifi_connector_example.py)
-- [boot.py](file://boot.py)
-- [main.py](file://main.py)
-- [SystemStatus.py](file://lib/SystemStatus.py)
-- [BreathLED.py](file://lib/BreathLED.py)
+- [WifiConnector.py](file://src/lib/WifiConnector.py)
+- [boot.py](file://src/boot.py)
+- [main.py](file://src/main.py)
+- [SystemStatus.py](file://src/lib/SystemStatus.py)
+- [BreathLED.py](file://src/lib/BreathLED.py)
 </cite>
+
+## 更新摘要
+**变更内容**
+- 更新以反映WifiConnector.py的实际完整功能实现
+- 移除对简化版本的描述，基于真实代码重构文档
+- 修正API接口文档以匹配实际实现
+- 更新架构分析以反映完整的功能集
 
 ## 目录
 1. [简介](#简介)
@@ -28,12 +32,9 @@
 本技术文档围绕ESP32 MicroPython环境下的WiFi连接管理模块展开，重点解析WifiConnector类的设计架构、核心功能实现与使用模式。内容涵盖网络扫描、连接管理、自动重连、热点创建、静态IP配置等关键能力，并提供完整的API接口说明、参数与返回值类型、异常处理机制、实际代码示例与最佳实践指导。文档还解释了WiFi连接状态管理、错误诊断与故障排除方法，并说明模块的配置选项、性能优化与扩展能力。
 
 ## 项目结构
-该仓库采用“模块化+示例”的组织方式：
-- lib目录：核心库与示例代码
-  - WifiConnector.py：WiFi连接管理主类
-  - WifiConnector_README.md：功能说明与API参考
-  - WifiConnector_min.py：精简版实现
-  - wifi_connector_example.py：功能演示与使用示例
+该仓库采用"模块化+示例"的组织方式：
+- src/lib目录：核心库与示例代码
+  - WifiConnector.py：WiFi连接管理主类，提供完整的网络管理功能
   - boot.py：系统启动流程，负责WiFi连接与AP模式切换
   - main.py：Web服务入口，提供REST API与前端资源
   - SystemStatus.py：系统LED状态指示
@@ -52,37 +53,34 @@ subgraph "库层"
 WC["WifiConnector.py<br/>WiFi连接管理"]
 SYS["SystemStatus.py<br/>LED状态指示"]
 LED["BreathLED.py<br/>LED呼吸控制"]
-EX["wifi_connector_example.py<br/>功能演示"]
 end
 BOOT --> WC
 MAIN --> WC
 BOOT --> SYS
 SYS --> LED
-EX --> WC
 FRONT --> MAIN
 ```
 
-图表来源
-- [boot.py](file://boot.py#L1-L122)
-- [main.py](file://main.py#L1-L548)
-- [WifiConnector.py](file://lib/WifiConnector.py#L1-L120)
-- [SystemStatus.py](file://lib/SystemStatus.py#L1-L61)
-- [BreathLED.py](file://lib/BreathLED.py#L1-L120)
-- [wifi_connector_example.py](file://lib/wifi_connector_example.py#L1-L120)
+**图表来源**
+- [boot.py](file://src/boot.py#L1-L153)
+- [main.py](file://src/main.py#L1-L800)
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L1-L1019)
+- [SystemStatus.py](file://src/lib/SystemStatus.py#L1-L146)
+- [BreathLED.py](file://src/lib/BreathLED.py#L1-L347)
 
-章节来源
-- [boot.py](file://boot.py#L1-L122)
-- [main.py](file://main.py#L1-L120)
+**章节来源**
+- [boot.py](file://src/boot.py#L1-L153)
+- [main.py](file://src/main.py#L1-L800)
 
 ## 核心组件
 - WifiConnector类：封装STA/AP模式、网络扫描、连接/断开、自动重连、静态IP配置、热点创建与管理、诊断与配置持久化等能力。
 - SystemStatus与BreathLED：提供系统LED状态指示，区分连接中、AP模式、运行中三种状态。
 - boot.py与main.py：系统启动与Web服务入口，集成WiFi连接与AP模式切换逻辑。
 
-章节来源
-- [WifiConnector.py](file://lib/WifiConnector.py#L11-L120)
-- [SystemStatus.py](file://lib/SystemStatus.py#L19-L61)
-- [BreathLED.py](file://lib/BreathLED.py#L11-L120)
+**章节来源**
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L5-L120)
+- [SystemStatus.py](file://src/lib/SystemStatus.py#L27-L146)
+- [BreathLED.py](file://src/lib/BreathLED.py#L5-L347)
 
 ## 架构总览
 WifiConnector类通过ESP32的network.WLAN接口管理STA与AP两种模式，结合缓存与自动同步机制，提供稳定的网络状态查询与维护。系统启动阶段由boot.py负责加载配置、尝试连接、失败时进入AP模式；运行阶段由main.py提供HTTP服务，二者均依赖WifiConnector进行网络管理。
@@ -105,10 +103,10 @@ Boot->>Main : 启动Web服务热点模式
 end
 ```
 
-图表来源
-- [boot.py](file://boot.py#L22-L87)
-- [WifiConnector.py](file://lib/WifiConnector.py#L595-L799)
-- [main.py](file://main.py#L541-L548)
+**图表来源**
+- [boot.py](file://src/boot.py#L28-L105)
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L315-L376)
+- [main.py](file://src/main.py#L534-L541)
 
 ## 详细组件分析
 
@@ -189,13 +187,13 @@ class WifiConnector {
 }
 ```
 
-图表来源
-- [WifiConnector.py](file://lib/WifiConnector.py#L11-L120)
-- [WifiConnector.py](file://lib/WifiConnector.py#L518-L1930)
+**图表来源**
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L5-L120)
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L130-L1019)
 
-章节来源
-- [WifiConnector.py](file://lib/WifiConnector.py#L11-L120)
-- [WifiConnector.py](file://lib/WifiConnector.py#L518-L1930)
+**章节来源**
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L5-L120)
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L130-L1019)
 
 ### 网络扫描与连接管理
 - 网络扫描：scan_networks支持自定义超时，返回包含SSID、BSSID、信道、RSSI、认证模式、信号质量等信息的列表，并按RSSI降序排列。
@@ -225,14 +223,14 @@ WC-->>App : False
 end
 ```
 
-图表来源
-- [WifiConnector.py](file://lib/WifiConnector.py#L595-L696)
-- [WifiConnector.py](file://lib/WifiConnector.py#L253-L289)
+**图表来源**
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L315-L376)
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L120-L129)
 
-章节来源
-- [WifiConnector.py](file://lib/WifiConnector.py#L518-L592)
-- [WifiConnector.py](file://lib/WifiConnector.py#L595-L696)
-- [WifiConnector.py](file://lib/WifiConnector.py#L697-L800)
+**章节来源**
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L276-L314)
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L315-L376)
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L414-L435)
 
 ### 自动重连与连接监控
 - 自动重连：reconnect在无显式凭据时返回失败；有凭据时按max_attempts循环尝试，每次间隔2秒；成功后重置连接计数器。
@@ -257,13 +255,13 @@ MarkSynced --> End
 KeepOk --> End
 ```
 
-图表来源
-- [WifiConnector.py](file://lib/WifiConnector.py#L1645-L1678)
-- [WifiConnector.py](file://lib/WifiConnector.py#L1680-L1694)
+**图表来源**
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L860-L882)
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L883-L891)
 
-章节来源
-- [WifiConnector.py](file://lib/WifiConnector.py#L761-L800)
-- [WifiConnector.py](file://lib/WifiConnector.py#L1645-L1694)
+**章节来源**
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L414-L435)
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L860-L891)
 
 ### 热点创建与管理
 - 热点创建：create_hotspot支持自定义SSID、密码（至少8位）、信道（1-13）、最大客户端数（1-10）、认证模式（开放/WEP/WPA/WPA2/WPA/WPA2-PSK）、IP配置（IP/子网/网关/DNS）。支持动态配置热点IP与持久化配置。
@@ -286,13 +284,13 @@ WC->>AP : ifconfig()/status('stations')
 WC-->>App : 热点信息
 ```
 
-图表来源
-- [WifiConnector.py](file://lib/WifiConnector.py#L1193-L1300)
-- [WifiConnector.py](file://lib/WifiConnector.py#L1392-L1463)
+**图表来源**
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L610-L676)
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L720-L763)
 
-章节来源
-- [WifiConnector.py](file://lib/WifiConnector.py#L1191-L1390)
-- [WifiConnector.py](file://lib/WifiConnector.py#L1392-L1540)
+**章节来源**
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L610-L676)
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L720-L804)
 
 ### 静态IP配置与DHCP/静态IP动态切换
 - 静态IP配置：configure_static_ip支持独立配置，connect_with_static_ip一步到位，_configure_static_ip内部实现，包含IP/子网/网关/DNS验证与自动推断网关。
@@ -310,20 +308,20 @@ LogSaved --> End([结束])
 LogApplied --> End
 ```
 
-图表来源
-- [WifiConnector.py](file://lib/WifiConnector.py#L907-L974)
-- [WifiConnector.py](file://lib/WifiConnector.py#L1038-L1112)
+**图表来源**
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L498-L527)
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L553-L589)
 
-章节来源
-- [WifiConnector.py](file://lib/WifiConnector.py#L905-L1190)
-- [WifiConnector.py](file://lib/WifiConnector.py#L1757-L1869)
+**章节来源**
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L498-L589)
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L917-L982)
 
 ### 配置持久化与诊断
 - 配置持久化：save_config保存SSID/密码、静态IP配置、连接参数、同步间隔；load_config加载配置；save_hotspot_config/load_hotspot_config/start_hotspot_from_config管理热点配置。
 - 诊断：get_diagnostics返回STA/AP活动状态、连接状态、IP模式、连接尝试次数、错误信息、同步间隔、网络信息等；cleanup释放STA/AP资源。
 
-章节来源
-- [WifiConnector.py](file://lib/WifiConnector.py#L1757-L1930)
+**章节来源**
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L983-L1019)
 
 ### API接口文档（概览）
 - 网络扫描与连接
@@ -380,9 +378,8 @@ LogApplied --> End
   - set_timeouts(scan_timeout=None, connect_timeout=None) -> void
   - set_sync_intervals(sync_interval=None, force_sync_interval=None) -> void
 
-章节来源
-- [WifiConnector.py](file://lib/WifiConnector.py#L518-L1930)
-- [WifiConnector_README.md](file://lib/WifiConnector_README.md#L146-L290)
+**章节来源**
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L276-L1019)
 
 ### 使用模式与最佳实践
 - 启动流程：boot.py加载配置，设置较长连接超时与重试次数，尝试连接；失败则创建AP并进入热点模式。
@@ -391,15 +388,14 @@ LogApplied --> End
 - 静态IP：在需要固定IP的场景使用configure_static_ip或connect_with_static_ip；在运行中使用switch_to_static_ip/switch_to_dhcp动态切换。
 - 配置持久化：save_config与save_hotspot_config分别保存WiFi与热点配置，避免重复输入。
 
-章节来源
-- [boot.py](file://boot.py#L22-L87)
-- [main.py](file://main.py#L299-L548)
-- [wifi_connector_example.py](file://lib/wifi_connector_example.py#L611-L787)
+**章节来源**
+- [boot.py](file://src/boot.py#L28-L105)
+- [main.py](file://src/main.py#L534-L541)
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L860-L891)
 
 ## 依赖关系分析
 - WifiConnector依赖ESP32的network.WLAN接口管理STA/AP模式，依赖ubinascii/ujson进行数据处理，依赖time进行超时与同步控制。
 - boot.py与main.py依赖WifiConnector进行网络管理；boot.py还依赖SystemStatus与BreathLED进行LED状态指示。
-- wifi_connector_example.py作为功能演示，展示各类API的使用方式。
 
 ```mermaid
 graph LR
@@ -411,21 +407,19 @@ BOOT["boot.py"] --> WC
 BOOT --> SYS["SystemStatus.py"]
 SYS --> LED["BreathLED.py"]
 MAIN["main.py"] --> WC
-EX["wifi_connector_example.py"] --> WC
 ```
 
-图表来源
-- [WifiConnector.py](file://lib/WifiConnector.py#L6-L11)
-- [boot.py](file://boot.py#L1-L12)
-- [SystemStatus.py](file://lib/SystemStatus.py#L10-L10)
-- [BreathLED.py](file://lib/BreathLED.py#L6-L9)
-- [main.py](file://main.py#L10-L11)
-- [wifi_connector_example.py](file://lib/wifi_connector_example.py#L22-L23)
+**图表来源**
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L1-L4)
+- [boot.py](file://src/boot.py#L1-L8)
+- [SystemStatus.py](file://src/lib/SystemStatus.py#L15-L17)
+- [BreathLED.py](file://src/lib/BreathLED.py#L1-L4)
+- [main.py](file://src/main.py#L1-L16)
 
-章节来源
-- [WifiConnector.py](file://lib/WifiConnector.py#L6-L11)
-- [boot.py](file://boot.py#L1-L12)
-- [main.py](file://main.py#L10-L11)
+**章节来源**
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L1-L4)
+- [boot.py](file://src/boot.py#L1-L8)
+- [main.py](file://src/main.py#L1-L16)
 
 ## 性能考量
 - 缓存与自动同步：通过_get_auto_sync_network_info与_last_sync_time避免频繁查询底层ifconfig，降低CPU与内存压力。
@@ -433,12 +427,10 @@ EX["wifi_connector_example.py"] --> WC
 - 静态IP切换：在已连接状态下动态切换静态IP，避免不必要的断开重连。
 - 资源清理：cleanup确保STA/AP接口释放，避免资源泄漏。
 
-[本节为通用指导，无需特定文件引用]
-
 ## 故障排除指南
 - 连接失败
   - 检查SSID与密码是否正确；确认网络在扫描范围内；查看get_last_error获取详细错误信息。
-  - 若出现“密码错误/未找到接入点/连接失败”，根据状态码定位原因。
+  - 若出现"密码错误/未找到接入点/连接失败"，根据状态码定位原因。
 - 连接不稳定
   - 启用monitor_connection进行周期性监控；检查信号强度；调整重连参数。
 - IP地址获取失败
@@ -448,19 +440,15 @@ EX["wifi_connector_example.py"] --> WC
 - 静态IP问题
   - 检查IP/子网/网关/DNS格式；使用get_configured_*便捷访问器核对配置；必要时clear_static_ip_config后重新配置。
 
-章节来源
-- [WifiConnector.py](file://lib/WifiConnector.py#L198-L251)
-- [WifiConnector.py](file://lib/WifiConnector.py#L253-L325)
-- [WifiConnector.py](file://lib/WifiConnector.py#L327-L340)
-- [WifiConnector_README.md](file://lib/WifiConnector_README.md#L355-L379)
+**章节来源**
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L80-L105)
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L315-L376)
+- [WifiConnector.py](file://src/lib/WifiConnector.py#L498-L527)
 
 ## 结论
 WifiConnector类在ESP32 MicroPython环境下提供了完善的WiFi连接管理能力，覆盖网络扫描、连接/断开、自动重连、静态IP与DHCP动态切换、热点创建与管理、配置持久化与诊断等关键功能。通过缓存与自动同步机制、参数化超时与重试策略、便捷访问器与诊断接口，模块在易用性与可靠性方面表现优异。结合boot.py与main.py的启动与Web服务流程，可构建稳定可靠的物联网应用。
 
-[本节为总结，无需特定文件引用]
-
 ## 附录
-- 快速开始示例路径：[wifi_connector_example.py](file://lib/wifi_connector_example.py#L611-L787)
-- 启动流程示例路径：[boot.py](file://boot.py#L22-L87)
-- Web服务入口路径：[main.py](file://main.py#L541-L548)
-- API参考路径：[WifiConnector_README.md](file://lib/WifiConnector_README.md#L146-L290)
+- 快速开始示例路径：[boot.py](file://src/boot.py#L28-L105)
+- Web服务入口路径：[main.py](file://src/main.py#L534-L541)
+- API参考路径：[WifiConnector.py](file://src/lib/WifiConnector.py#L276-L1019)

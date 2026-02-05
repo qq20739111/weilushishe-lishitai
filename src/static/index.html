@@ -8,7 +8,7 @@
 </head>
 <body>
     <!-- 维护模式页面 -->
-    <section id="maintenance-section" class="hidden" style="height: 100vh; justify-content: center; align-items: center; background: var(--bg);">
+    <section id="maintenance-section" class="hidden" style="display: flex; height: 100vh; justify-content: center; align-items: center; background: var(--bg);">
         <div class="card" style="width: 100%; max-width: 400px; text-align: center; padding: 40px 30px;">
             <div style="font-size: 64px; margin-bottom: 20px;">🔧</div>
             <h2 style="margin: 0 0 15px 0; color: var(--text);">系统维护中</h2>
@@ -18,7 +18,7 @@
     </section>
 
     <!-- Login Section (默认隐藏) -->
-    <section id="login-section" class="hidden" style="height: 100vh; justify-content: center; align-items: center; background: var(--bg);">
+    <section id="login-section" class="hidden" style="display: flex; height: 100vh; justify-content: center; align-items: center; background: var(--bg);">
         <div class="card" style="width: 100%; max-width: 400px; text-align: center;">
             <div style="margin-bottom: 20px;">
                 <img src="/static/logo.png" alt="Logo" style="height: 80px;">
@@ -515,7 +515,7 @@
                 <div>
                     <label style="display:block; font-size:0.85em; color:#666; margin-bottom:6px;">密码加盐值 (Salt)</label>
                     <div class="admin-field-row">
-                        <input type="text" id="setting-password-salt" placeholder="weilu2018" style="flex:1;">
+                        <input type="text" id="setting-password-salt" placeholder="输入密码加盐值" style="flex:1;">
                         <button onclick="savePasswordSalt()" style="background:#e67e22;">保存</button>
                     </div>
                     <p style="font-size:0.8em; color:#e74c3c; margin-top:8px;">注意：修改Salt后所有现有密码将失效，需要重置！</p>
@@ -786,6 +786,7 @@
     </div>
     
     </div> <!-- Close main-app div -->
+    <script src="/static/marked.umd.js"></script>
     <script src="/static/app.js"></script>
 </body>
 </html>

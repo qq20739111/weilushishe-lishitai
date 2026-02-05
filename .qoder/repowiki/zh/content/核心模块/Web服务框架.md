@@ -16,9 +16,10 @@
 
 ## 更新摘要
 **变更内容**
-- 更新所有文件路径引用，从根目录 main.py 更新到 src/main.py
-- 更新项目结构图和依赖关系图，反映新的目录结构
-- 更新启动流程说明，反映 boot.py 现在位于 src/ 目录
+- 新增大型文件上传安全处理机制，包括请求大小限制和内存管理
+- 增强请求处理的安全性，防止内存溢出攻击
+- 优化内存管理策略，包括垃圾回收机制和请求体释放
+- 新增分表备份API，支持大数据量的分批处理
 
 ## 目录
 1. [简介](#简介)
@@ -35,7 +36,7 @@
 ## 简介
 本项目基于 MicroPython 的轻量级 Web 服务框架，在 ESP32 设备上提供 RESTful API 与静态资源服务，支撑"围炉诗社·理事台"的前端交互与数据持久化。系统采用自研的微型 Web 框架 Microdot，结合 JSON Lines 数据库与前端 SPA 应用，实现低内存占用、高可用的嵌入式 Web 服务。
 
-**更新** 项目结构已重构，所有源代码现位于 src/ 目录下，包括主应用、库模块和静态资源。
+**更新** 项目结构已重构，所有源代码现位于 src/ 目录下，包括主应用、库模块和静态资源。新增了针对大型文件上传的安全处理机制，确保系统在处理大请求时的稳定性和安全性。
 
 ## 项目结构
 - 源代码目录：src/
@@ -65,20 +66,21 @@ Main --> Settings["src/data/settings.json<br/>自定义字段"]
 
 **图表来源**
 - [src/boot.py](file://src/boot.py#L1-L122)
-- [src/main.py](file://src/main.py#L1-L712)
-- [src/lib/microdot.py](file://src/lib/microdot.py#L1-L183)
+- [src/main.py](file://src/main.py#L1-L2205)
+- [src/lib/microdot.py](file://src/lib/microdot.py#L1-L226)
 - [src/lib/WifiConnector.py](file://src/lib/WifiConnector.py#L1-L1930)
 - [src/lib/SystemStatus.py](file://src/lib/SystemStatus.py#L1-L61)
 - [src/data/config.json](file://src/data/config.json#L1-L6)
 - [src/data/settings.json](file://src/data/settings.json#L1-L1)
 
 **章节来源**
-- [src/main.py](file://src/main.py#L1-L712)
+- [src/main.py](file://src/main.py#L1-L2205)
 - [src/boot.py](file://src/boot.py#L1-L122)
 
 ## 核心组件
 - Web 框架 Microdot
   - 提供请求解析、路由注册、响应生成与静态文件发送能力。
+  - **新增** 大型文件上传安全处理：请求大小限制（600KB）、内存管理、垃圾回收机制。
 - JSON Lines 数据库 JsonlDB
   - 面向嵌入式场景的轻量数据层，支持追加、分页查询、全文检索、更新与删除。
 - 前端 SPA 应用
@@ -87,7 +89,7 @@ Main --> Settings["src/data/settings.json<br/>自定义字段"]
   - WiFi 自动连接与 AP 备份、LED 状态指示，保障设备可访问性与可观测性。
 
 **章节来源**
-- [src/lib/microdot.py](file://src/lib/microdot.py#L1-L183)
+- [src/lib/microdot.py](file://src/lib/microdot.py#L1-L226)
 - [src/main.py](file://src/main.py#L53-L267)
 
 ## 架构总览
@@ -125,12 +127,17 @@ Microdot-->>Client : HTTP 响应
 ### Web 框架 Microdot
 - 请求解析
   - 解析首行、头部、查询参数与 JSON 请求体。
+  - **新增** 请求大小限制：单次请求最大 600KB，防止内存溢出攻击。
+  - **新增** 内存管理：大请求体采用分块读取，小请求体确保完整读取。
 - 路由与调度
   - 路由装饰器注册处理器，匹配方法与路径后调用。
 - 响应生成
   - 支持字符串、字典/列表（自动序列化为 JSON）、文件流（send_file）。
 - 服务器运行
   - 基于 uasyncio 的异步服务器，循环监听端口。
+- **新增** 内存管理机制
+  - 请求处理前后自动触发垃圾回收，释放请求体内存。
+  - 大请求体处理后立即释放内存，防止内存累积。
 
 ```mermaid
 classDiagram
@@ -160,10 +167,10 @@ Microdot --> Response : "生成"
 ```
 
 **图表来源**
-- [src/lib/microdot.py](file://src/lib/microdot.py#L5-L183)
+- [src/lib/microdot.py](file://src/lib/microdot.py#L5-L226)
 
 **章节来源**
-- [src/lib/microdot.py](file://src/lib/microdot.py#L1-L183)
+- [src/lib/microdot.py](file://src/lib/microdot.py#L1-L226)
 
 ### JSON Lines 数据库 JsonlDB
 - 文件组织
@@ -232,12 +239,64 @@ Return --> End
 - 积分与日志
   - GET /api/points/yearly_ranking（年度积分排行榜）
   - GET /api/login_logs（登录日志）
+- **新增** 备份与恢复 API
+  - GET/POST /api/backup/export（全站数据导出）
+  - POST /api/backup/import（全站数据导入）
+  - GET /api/backup/tables（可备份表列表）
+  - GET /api/backup/export-table（分表导出）
+  - POST /api/backup/import-table（分表导入）
 
 **章节来源**
-- [src/main.py](file://src/main.py#L299-L712)
+- [src/main.py](file://src/main.py#L299-L2205)
 
 ### WebSocket 支持
 - 当前实现未包含 WebSocket 支持。若需扩展，可在 Microdot 中引入 uasyncio 的 socket 协程与消息编解码逻辑，并在路由层提供升级握手与消息广播机制。
+
+### 大型文件上传安全处理
+**新增** 系统实现了全面的大型文件上传安全处理机制，确保在处理大请求时的稳定性和安全性：
+
+- **请求大小限制**
+  - 单次请求最大 600KB（614400 字节），超过限制的请求将被拒绝处理。
+  - 防止内存溢出攻击和资源耗尽攻击。
+
+- **内存管理策略**
+  - 大请求体（>4096字节）采用分块读取（4096字节块），避免一次性加载大文件到内存。
+  - 小请求体确保完整读取，但同样受 600KB 限制。
+  - 请求处理完成后立即释放内存，防止内存累积。
+
+- **垃圾回收机制**
+  - 请求读取前触发垃圾回收，释放可用内存。
+  - 请求处理完成后再次触发垃圾回收，确保内存及时释放。
+  - 大数据处理过程中定期触发垃圾回收，防止内存碎片。
+
+- **JSON 解析优化**
+  - 大请求体跳过自动 JSON 解析，由业务层手动处理。
+  - 小于等于 16KB 的请求才会自动解析 JSON，避免大请求影响性能。
+
+**章节来源**
+- [src/lib/microdot.py](file://src/lib/microdot.py#L40-L83)
+- [src/lib/microdot.py](file://src/lib/microdot.py#L181-L194)
+
+### 分表备份与大数据处理
+**新增** 系统提供了专门的大数据量处理能力，支持分批处理和内存友好的备份恢复：
+
+- **分表导出**
+  - 支持分页导出，每页默认 100 条记录，避免内存溢出。
+  - 支持多种表类型：members、poems、activities、tasks、finance、points_logs、login_logs。
+  - 返回 hasMore 标志，支持前端分批加载。
+
+- **分表导入**
+  - 支持覆盖模式（overwrite）和追加模式（append）。
+  - 大数据导入时自动分批处理，每批处理后释放内存。
+  - 导入过程中定期触发看门狗喂狗，防止长时间操作超时。
+
+- **手动 JSON 解析**
+  - 对于超大请求体，跳过自动 JSON 解析，改为手动解析。
+  - 支持 bytes 和字符串类型的请求体处理。
+  - 提供详细的错误诊断信息。
+
+**章节来源**
+- [src/main.py](file://src/main.py#L2007-L2187)
 
 ## 依赖关系分析
 - 启动阶段
@@ -262,7 +321,7 @@ AppJS["src/static/app.js"] --> API["/api/*"]
 **图表来源**
 - [src/boot.py](file://src/boot.py#L1-L122)
 - [src/main.py](file://src/main.py#L1-L120)
-- [src/lib/microdot.py](file://src/lib/microdot.py#L1-L183)
+- [src/lib/microdot.py](file://src/lib/microdot.py#L1-L226)
 - [src/data/config.json](file://src/data/config.json#L1-L6)
 - [src/data/settings.json](file://src/data/settings.json#L1-L1)
 
@@ -277,14 +336,19 @@ AppJS["src/static/app.js"] --> API["/api/*"]
   - JsonlDB 采用顺序扫描与临时文件重写，避免频繁随机读写；分页与搜索分离快慢路径，降低内存占用。
 - 前端缓存
   - SPA 对常用数据进行本地缓存，减少重复请求；分页加载与草稿合并提升体验。
-- 内存管理
+- **新增** 内存管理优化
   - 定期触发垃圾回收，打印可用内存；合理控制响应体大小，避免一次性加载大文件。
+  - 请求处理前后自动释放内存，防止内存泄漏。
+- **新增** 大数据处理策略
+  - 分表备份支持分批处理，每批处理后释放内存。
+  - 导入过程中定期触发看门狗喂狗，确保长时间操作的稳定性。
 - 并发策略
   - 建议限制并发连接数与请求体大小；对耗时操作（如搜索）设置超时；必要时拆分为多进程或外部协程池。
 
 **章节来源**
 - [src/lib/microdot.py](file://src/lib/microdot.py#L154-L165)
 - [src/main.py](file://src/main.py#L279-L294)
+- [src/main.py](file://src/main.py#L1856-L2005)
 
 ## 故障排查指南
 - WiFi 连接失败
@@ -297,14 +361,23 @@ AppJS["src/static/app.js"] --> API["/api/*"]
   - 确认 /api/login 的凭据正确；检查网络连通性与跨域问题；查看浏览器控制台错误。
 - 存储空间不足
   - 清理历史数据；监控 /api/system/info 中剩余存储；考虑压缩或归档策略。
+- **新增** 大文件上传失败
+  - 检查请求大小是否超过 600KB 限制；查看是否有内存不足错误。
+  - 确认备份导入时的分批处理是否正确执行。
+  - 检查看门狗是否正常工作，避免长时间操作超时。
 
 **章节来源**
 - [src/boot.py](file://src/boot.py#L22-L87)
 - [src/lib/microdot.py](file://src/lib/microdot.py#L133-L138)
 - [src/main.py](file://src/main.py#L528-L540)
+- [src/main.py](file://src/main.py#L1860-L1876)
 
 ## 结论
-本项目以 Microdot 为核心，结合 JsonlDB 与前端 SPA，构建了面向 ESP32 的轻量级 Web 服务。其设计强调低内存占用、简单可靠与易扩展，适用于小型组织的内部管理系统。项目结构已重构至 src/ 目录，便于更好的代码组织与维护。后续可在保持现有架构的前提下，逐步引入 WebSocket、缓存层与更完善的鉴权体系。
+本项目以 Microdot 为核心，结合 JsonlDB 与前端 SPA，构建了面向 ESP32 的轻量级 Web 服务。其设计强调低内存占用、简单可靠与易扩展，适用于小型组织的内部管理系统。项目结构已重构至 src/ 目录，便于更好的代码组织与维护。
+
+**更新** 新增的大型文件上传安全处理机制显著提升了系统的安全性和稳定性，包括请求大小限制、内存管理和垃圾回收策略。分表备份 API 支持大数据量的高效处理，确保系统在处理大量数据时的性能和可靠性。
+
+后续可在保持现有架构的前提下，逐步引入 WebSocket、缓存层与更完善的鉴权体系，进一步提升系统的功能完整性。
 
 ## 附录
 
@@ -342,23 +415,33 @@ AppJS["src/static/app.js"] --> API["/api/*"]
   - GET /api/system/info
 - Login
   - POST /api/login
+- **新增** Backup & Restore
+  - GET/POST /api/backup/export
+  - POST /api/backup/import
+  - GET /api/backup/tables
+  - GET /api/backup/export-table
+  - POST /api/backup/import-table
 
 **章节来源**
-- [src/main.py](file://src/main.py#L299-L712)
+- [src/main.py](file://src/main.py#L299-L2205)
 
 ### 请求参数与响应格式约定
 - 请求体
   - 默认 JSON；非 JSON 请求体按字符串处理。
+  - **新增** 大于 16KB 的 JSON 请求体不会自动解析，需要业务层手动处理。
 - 响应体
   - 字符串：纯文本响应。
   - 字典/列表：自动序列化为 JSON，Content-Type: application/json。
   - 文件：send_file 返回二进制流，设置 Content-Type 与 Content-Length。
 - 状态码
   - 200 成功；400 参数错误；401 未授权；404 未找到；500 服务器错误。
+- **新增** 请求大小限制
+  - 单次请求最大 600KB；超过限制的请求将被拒绝处理。
 
 **章节来源**
 - [src/lib/microdot.py](file://src/lib/microdot.py#L51-L93)
 - [src/lib/microdot.py](file://src/lib/microdot.py#L140-L144)
+- [src/lib/microdot.py](file://src/lib/microdot.py#L40-L44)
 
 ### 与主应用服务的集成与扩展
 - 集成方式
@@ -367,7 +450,11 @@ AppJS["src/static/app.js"] --> API["/api/*"]
   - 新增业务模块：定义数据模型、路由与控制器，遵循现有命名与错误处理风格。
   - 引入中间件：在 Microdot.handle_request 前后插入通用逻辑（鉴权、日志、限流）。
   - 增强前端：在 src/static/app.js 中新增页面与 API 调用，注意分页与错误提示。
+- **新增** 大数据处理扩展
+  - 使用分表备份 API 处理大量数据的导入导出。
+  - 实现自定义的内存管理策略，确保大数据处理的稳定性。
 
 **章节来源**
 - [src/main.py](file://src/main.py#L17-L120)
 - [src/lib/microdot.py](file://src/lib/microdot.py#L104-L152)
+- [src/main.py](file://src/main.py#L2007-L2187)
