@@ -98,7 +98,7 @@
                     </div>
                     <div class="home-chat-input-area">
                         <div style="display:flex; gap:8px; align-items:flex-end;">
-                            <textarea id="home-chat-input" placeholder="输入消息..." maxlength="256" rows="1" style="flex:1; margin:0; padding:8px 12px; resize:none; font-family:inherit; font-size:inherit;" oninput="updateHomeChatSendBtn()" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendHomeChatMessage();}"></textarea>
+                            <textarea id="home-chat-input" placeholder="输入消息..." maxlength="1024" rows="1" style="flex:1; margin:0; padding:8px 12px; resize:none; font-family:inherit; font-size:inherit;" oninput="updateHomeChatSendBtn()" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendHomeChatMessage();}"></textarea>
                             <button id="home-chat-send-btn" onclick="sendHomeChatMessage()" disabled style="padding:8px 16px; margin:0;">发送</button>
                         </div>
                     </div>
@@ -117,9 +117,9 @@
                         </div>
                         <div class="chat-input-area">
                             <div class="chat-input-wrapper">
-                                <textarea id="chat-input" placeholder="输入消息（最多256字）" maxlength="256" rows="2" oninput="updateChatSendBtn()"></textarea>
+                                <textarea id="chat-input" placeholder="输入消息（最多1024字）" maxlength="1024" rows="2" oninput="updateChatSendBtn()"></textarea>
                                 <div class="chat-input-info">
-                                    <span id="chat-char-count">0/256</span>
+                                    <span id="chat-char-count">0/1024</span>
                                     <button id="chat-send-btn" onclick="sendChatMessage()" disabled>发送</button>
                                 </div>
                             </div>

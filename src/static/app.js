@@ -378,6 +378,7 @@ async function login() {
             }
             localStorage.setItem('user', JSON.stringify(user));
             window._maintenanceLoginMode = false;
+            resetChatState();  // 重置聊天室状态，确保重新获取登录用户身份
             checkLogin();
         } else {
             const err = await res.json().catch(() => ({}));
@@ -397,6 +398,7 @@ async function login() {
 }
 
 function logout() {
+    resetChatState();  // 重置聊天室状态，确保重新获取游客身份
     localStorage.removeItem('user');
     currentUser = null;
     // 重新检查登录状态和系统设置（allow_guest检查）
@@ -3443,28 +3445,47 @@ let _chatIsGuest = false;       // 是否为游客
 let _chatLastMsgId = 0;         // 最后一条消息ID（用于增量获取）
 let _chatPollingTimer = null;   // 轮询定时器
 let _chatJoined = false;        // 是否已加入聊天室
+let _chatInputBound = false;    // 输入框事件是否已绑定（防止重复绑定）
 let _homeChatTimer = null;      // 首页聊天刷新定时器
 let _homeChatLastMsgId = 0;     // 首页聊天最后消息ID
 let _homeChatMessages = [];     // 首页聊天消息缓存
 
-const CHAT_MAX_CHARS = 256;     // 最大字符数
+const CHAT_MAX_CHARS = 1024;    // 最大字符数
 const CHAT_POLL_INTERVAL = 10000; // 轮询间隔（10秒）
 const HOME_CHAT_INTERVAL = 10000; // 首页聊天刷新间隔（10秒）
+
+/**
+ * 重置聊天室状态（用于登录/登出时重新获取身份）
+ */
+function resetChatState() {
+    // 停止轮询
+    stopChatPolling();
+    
+    // 重置状态变量
+    _chatUserId = null;
+    _chatUserName = null;
+    _chatIsGuest = false;
+    _chatJoined = false;
+    _chatLastMsgId = 0;
+}
 
 /**
  * 初始化聊天室
  */
 async function initChat() {
-    // 绑定输入框事件
-    const input = document.getElementById('chat-input');
-    if (input) {
-        input.addEventListener('input', updateChatCharCount);
-        input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendChatMessage();
-            }
-        });
+    // 绑定输入框事件（仅首次绑定，防止重复）
+    if (!_chatInputBound) {
+        const input = document.getElementById('chat-input');
+        if (input) {
+            input.addEventListener('input', updateChatCharCount);
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendChatMessage();
+                }
+            });
+            _chatInputBound = true;
+        }
     }
     
     // 加入聊天室
