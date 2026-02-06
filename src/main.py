@@ -2346,7 +2346,7 @@ def backup_import_table(request):
 
 # 聊天室配置
 CHAT_MAX_SIZE_DEFAULT = 128 * 1024  # 默认128KB 最大消息缓存
-CHAT_MSG_MAX_SIZE = 1024    # 单条消息最大字节数
+CHAT_MSG_MAX_CHARS = 1024   # 单条消息最大字符数
 CHAT_GUEST_MAX_DEFAULT = 10 # 默认最大游客数量
 CHAT_GUEST_EXPIRE = 3600    # 游客昵称使用时长（秒）= 1小时
 CHAT_GUEST_NAMES = ['路人甲', '路人乙', '路人丙', '路人丁', '路人戊', 
@@ -2537,10 +2537,9 @@ def chat_send_message(request):
     if not content:
         return Response('{"error": "消息内容不能为空"}', 400, {'Content-Type': 'application/json'})
     
-    # 检查消息大小限制
-    content_bytes = content.encode('utf-8')
-    if len(content_bytes) > CHAT_MSG_MAX_SIZE:
-        return Response('{"error": "消息过长，最多256个中文字符"}', 400, {'Content-Type': 'application/json'})
+    # 检查消息字符数限制
+    if len(content) > CHAT_MSG_MAX_CHARS:
+        return Response('{"error": "消息过长，最多1024个字符"}', 400, {'Content-Type': 'application/json'})
     
     # 验证发送者身份
     sender_id = None
