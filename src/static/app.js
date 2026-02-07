@@ -525,6 +525,14 @@ async function saveProfile() {
         return;
     }
     
+    // 获取保存按钮并禁用，防止重复提交
+    const btn = document.querySelector('#modal-profile button[onclick*="saveProfile"]');
+    const oldText = btn ? btn.innerText : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = '保存中...';
+    }
+    
     try {
         const res = await fetchWithAuth(`${API_BASE}/profile/update`, {
             method: 'POST',
@@ -560,6 +568,11 @@ async function saveProfile() {
     } catch (e) {
         console.error(e);
         alert('网络错误，请重试');
+    } finally {
+        if (btn) {
+            btn.innerText = oldText;
+            btn.disabled = false;
+        }
     }
 }
 
@@ -581,6 +594,14 @@ async function submitProfilePassword() {
     if (newPwd.length < 4) {
         alert('新密码长度至少4位');
         return;
+    }
+    
+    // 获取修改密码按钮并禁用，防止重复提交
+    const btn = document.querySelector('#modal-profile button[onclick*="submitProfilePassword"]');
+    const oldText = btn ? btn.innerText : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = '修改中...';
     }
     
     try {
@@ -607,6 +628,11 @@ async function submitProfilePassword() {
     } catch (e) {
         console.error(e);
         alert('网络错误，请重试');
+    } finally {
+        if (btn) {
+            btn.innerText = oldText;
+            btn.disabled = false;
+        }
     }
 }
 
@@ -896,7 +922,7 @@ function renderPoems() {
                 ${ canManage ? `
                     <div style="margin-left:auto;">
                         <button onclick="openPoemModal(_cachedPoems.find(x => x.id == '${p.id}' || x.id == ${p.id}))" style="background:#4CAF50; padding:6px 14px; font-size:0.9em; margin-right:8px;">${p.isLocal ? '编辑' : '修订'}</button>
-                        <button onclick="deletePoemWrapper(${idParam}, ${isLocalParam})" style="background:#e74c3c; padding:6px 14px; font-size:0.9em;">删除</button>
+                        <button onclick="deletePoemWrapper(${idParam}, ${isLocalParam}, event)" style="background:#e74c3c; padding:6px 14px; font-size:0.9em;">删除</button>
                     </div>
                 ` : ''}
             </div>
@@ -993,6 +1019,15 @@ async function publishPoem() {
     
     if(!title || !content) { alert('请填写标题和正文'); return; }
 
+    // 获取发布按钮并禁用，防止重复提交
+    const btns = document.querySelectorAll('#poem-modal-actions button');
+    const btn = Array.from(btns).find(b => b.textContent.includes('发布'));
+    const oldText = btn ? btn.innerText : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = '发布中...';
+    }
+
     const poemData = {
         title, type, content,
         author: currentUser.alias || currentUser.name,
@@ -1019,6 +1054,12 @@ async function publishPoem() {
             alert('发布失败');
         }
     } catch(e) { console.error(e); alert('网络错误'); }
+    finally {
+        if (btn) {
+            btn.innerText = oldText;
+            btn.disabled = false;
+        }
+    }
 }
 
 async function submitPoemUpdate() {
@@ -1027,6 +1068,15 @@ async function submitPoemUpdate() {
    const content = document.getElementById('p-content').value;
    const type = document.getElementById('p-type').value;
    const date = document.getElementById('p-date').value;
+   
+   // 获取更新按钮并禁用，防止重复提交
+   const btns = document.querySelectorAll('#poem-modal-actions button');
+   const btn = Array.from(btns).find(b => b.textContent.includes('更新'));
+   const oldText = btn ? btn.innerText : '';
+   if (btn) {
+       btn.disabled = true;
+       btn.innerText = '更新中...';
+   }
    
    try {
        const res = await fetch(`${API_BASE}/poems/update`, {
@@ -1043,10 +1093,25 @@ async function submitPoemUpdate() {
            fetchPoems();
        } else { alert('更新失败'); }
    } catch(e) { console.error(e); }
+   finally {
+       if (btn) {
+           btn.innerText = oldText;
+           btn.disabled = false;
+       }
+   }
 }
 
 async function withdrawPoem() {
     if(!confirm('撤回后，该作品将仅保存在您的本地草稿箱中。继续？')) return;
+    
+    // 获取撤回按钮并禁用，防止重复提交
+    const btns = document.querySelectorAll('#poem-modal-actions button');
+    const btn = Array.from(btns).find(b => b.textContent.includes('撤回'));
+    const oldText = btn ? btn.innerText : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = '撤回中...';
+    }
     
     // 1. Get current content
     const title = document.getElementById('p-title').value;
@@ -1081,16 +1146,34 @@ async function withdrawPoem() {
             alert('撤回失败(服务器删除失败)');
         }
     } catch(e) { alert('操作失败: ' + e); }
+    finally {
+        if (btn) {
+            btn.innerText = oldText;
+            btn.disabled = false;
+        }
+    }
 }
 
-async function deletePoemWrapper(id, isLocal) {
+async function deletePoemWrapper(id, isLocal, event) {
     if(!confirm('确定永久删除这篇作品吗？(无法恢复)')) return;
     
-    if (isLocal) {
-        await LocalDrafts.delete(id);
-        fetchPoems();
-    } else {
-        try {
+    // 获取按钮并禁用，防止重复提交
+    const btn = event?.target;
+    const oldText = btn ? btn.innerText : '';
+    const oldStyle = btn ? btn.style.cssText : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = '删除中...';
+        btn.style.background = '#999';
+        btn.style.color = '#fff';
+        btn.style.borderColor = '#999';
+    }
+    
+    try {
+        if (isLocal) {
+            await LocalDrafts.delete(id);
+            fetchPoems();
+        } else {
             const res = await fetch(`${API_BASE}/poems/delete`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -1098,7 +1181,14 @@ async function deletePoemWrapper(id, isLocal) {
             });
             if(res.ok) fetchPoems();
             else alert('删除失败');
-        } catch(e) { console.error(e); }
+        }
+    } catch(e) { console.error(e); }
+    finally {
+        if (btn) {
+            btn.style.cssText = oldStyle;
+            btn.innerText = oldText;
+            btn.disabled = false;
+        }
     }
 }
 
@@ -1300,7 +1390,7 @@ async function fetchMembers() {
                 ${canEdit ? (canEditThis 
                     ? `<button class="btn-edit" onclick="editMemberClick(${m.id})">编辑</button>` 
                     : `<button class="btn-edit" style="color:#aaa; border-color:#ccc; cursor:not-allowed;" disabled title="无权编辑此用户">编辑</button>`) : ''}
-                ${canDeleteThis ? `<button class="btn-remove" onclick="deleteMember(${m.id})">移除</button>` : ''}
+                ${canDeleteThis ? `<button class="btn-remove" onclick="deleteMember(${m.id}, event)">移除</button>` : ''}
             </div>
             ` : ''}
         </div>
@@ -1479,7 +1569,7 @@ async function submitMember() {
  * 删除社员
  * @param {number} id - 社员ID
  */
-async function deleteMember(id) {
+async function deleteMember(id, event) {
     // 前端检测：不能删除自己
     if (id === currentUser?.id) {
         alert('不能删除自己的账号');
@@ -1500,6 +1590,19 @@ async function deleteMember(id) {
     }
     
     if(!confirm('确定要移除该社员吗？此操作无法撤销。')) return;
+    
+    // 获取按钮并禁用，防止重复提交
+    const btn = event?.target;
+    const oldText = btn ? btn.innerText : '';
+    const oldStyle = btn ? btn.style.cssText : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = '删除中...';
+        btn.style.background = '#999';
+        btn.style.color = '#fff';
+        btn.style.borderColor = '#999';
+    }
+    
     try {
         const res = await fetch(`${API_BASE}/members/delete`, {
             method: 'POST',
@@ -1516,6 +1619,12 @@ async function deleteMember(id) {
     } catch(e) {
         console.error('删除社员失败:', e);
         alert('网络错误，请重试');
+    } finally {
+        if (btn) {
+            btn.style.cssText = oldStyle;
+            btn.innerText = oldText;
+            btn.disabled = false;
+        }
     }
 }
 
@@ -1620,31 +1729,31 @@ async function fetchTasks() {
             
             if(t.status === 'open') {
                 // 待领取：所有人可领取
-                actionButtons = `<button onclick="claimTask(${t.id})" class="btn-claim">领取任务</button>`;
+                actionButtons = `<button onclick="claimTask(${t.id}, event)" class="btn-claim">领取任务</button>`;
             } else if(t.status === 'claimed') {
                 // 进行中
                 if(isAssignee) {
                     // 领取者：可提交或撤销
                     actionButtons = `
-                        <button onclick="submitTaskComplete(${t.id})" class="btn-submit">提交完成</button>
-                        <button onclick="unclaimTask(${t.id})" class="btn-unclaim" style="margin-left:8px;">撤销领取</button>
+                        <button onclick="submitTaskComplete(${t.id}, event)" class="btn-submit">提交完成</button>
+                        <button onclick="unclaimTask(${t.id}, event)" class="btn-unclaim" style="margin-left:8px;">撤销领取</button>
                     `;
                     // 管理员额外显示直接验收按钮
                     if(isManager) {
-                        actionButtons += `<button onclick="forceApproveTask(${t.id})" class="btn-approve" style="margin-left:8px;">直接验收</button>`;
+                        actionButtons += `<button onclick="forceApproveTask(${t.id}, event)" class="btn-approve" style="margin-left:8px;">直接验收</button>`;
                     }
                 } else if(isManager) {
                     // 管理者：可撤销他人领取或直接验收
                     actionButtons = `
-                        <button onclick="forceApproveTask(${t.id})" class="btn-approve">直接验收</button>
-                        <button onclick="unclaimTask(${t.id})" class="btn-unclaim" style="margin-left:8px;">撤销领取</button>
+                        <button onclick="forceApproveTask(${t.id}, event)" class="btn-approve">直接验收</button>
+                        <button onclick="unclaimTask(${t.id}, event)" class="btn-unclaim" style="margin-left:8px;">撤销领取</button>
                     `;
                 }
             } else if(t.status === 'submitted' && (isCreator || isManager)) {
                 // 待验收：发布者或管理员可审批
                 actionButtons = `
-                    <button onclick="approveTask(${t.id})" class="btn-approve">通过</button>
-                    <button onclick="rejectTask(${t.id})" class="btn-reject">退回</button>
+                    <button onclick="approveTask(${t.id}, event)" class="btn-approve">通过</button>
+                    <button onclick="rejectTask(${t.id}, event)" class="btn-reject">退回</button>
                 `;
             }
             
@@ -1652,7 +1761,7 @@ async function fetchTasks() {
             // 管理员可删除任何状态的任务，发布者只能删除未完成的任务
             let deleteBtn = '';
             if(isManager || (isCreator && t.status !== 'completed')) {
-                deleteBtn = `<button onclick="deleteTask(${t.id})" class="btn-delete" style="margin-left:10px;">删除</button>`;
+                deleteBtn = `<button onclick="deleteTask(${t.id}, event)" class="btn-delete" style="margin-left:10px;">删除</button>`;
             }
             
             // 编辑按钮（仅理事及以上权限）
@@ -1747,6 +1856,14 @@ async function submitTask() {
     
     if(!title) { alert('请填写事务标题'); return; }
     
+    // 获取提交按钮并禁用，防止重复提交
+    const btn = document.querySelector('#modal-task button');
+    const oldText = btn ? btn.innerText : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = '提交中...';
+    }
+    
     try {
         if(_editingTaskId) {
             // 更新模式
@@ -1806,11 +1923,24 @@ async function submitTask() {
     } catch(e) {
         console.error(e);
         alert('网络错误');
+    } finally {
+        if (btn) {
+            btn.innerText = oldText;
+            btn.disabled = false;
+        }
     }
 }
 
-async function claimTask(taskId) {
+async function claimTask(taskId, event) {
     if(!confirm('确认领取此任务？')) return;
+    
+    // 获取按钮并禁用，防止重复提交
+    const btn = event?.target;
+    const oldText = btn ? btn.innerText : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = '领取中...';
+    }
     
     try {
         const res = await fetch(`${API_BASE}/tasks/claim`, {
@@ -1828,11 +1958,24 @@ async function claimTask(taskId) {
     } catch(e) {
         console.error(e);
         alert('网络错误');
+    } finally {
+        if (btn) {
+            btn.innerText = oldText;
+            btn.disabled = false;
+        }
     }
 }
 
-async function unclaimTask(taskId) {
+async function unclaimTask(taskId, event) {
     if(!confirm('确认撤销领取？任务将重新变为待领取状态。')) return;
+    
+    // 获取按钮并禁用，防止重复提交
+    const btn = event?.target;
+    const oldText = btn ? btn.innerText : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = '撤销中...';
+    }
     
     try {
         const res = await fetch(`${API_BASE}/tasks/unclaim`, {
@@ -1850,11 +1993,24 @@ async function unclaimTask(taskId) {
     } catch(e) {
         console.error(e);
         alert('网络错误');
+    } finally {
+        if (btn) {
+            btn.innerText = oldText;
+            btn.disabled = false;
+        }
     }
 }
 
-async function submitTaskComplete(taskId) {
+async function submitTaskComplete(taskId, event) {
     if(!confirm('确认提交任务？提交后将等待发布者验收。')) return;
+    
+    // 获取按钮并禁用，防止重复提交
+    const btn = event?.target;
+    const oldText = btn ? btn.innerText : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = '提交中...';
+    }
     
     try {
         const res = await fetch(`${API_BASE}/tasks/submit`, {
@@ -1872,11 +2028,24 @@ async function submitTaskComplete(taskId) {
     } catch(e) {
         console.error(e);
         alert('网络错误');
+    } finally {
+        if (btn) {
+            btn.innerText = oldText;
+            btn.disabled = false;
+        }
     }
 }
 
-async function approveTask(taskId) {
+async function approveTask(taskId, event) {
     if(!confirm(`确认验收通过？通过后将发放${getPointsName()}奖励。`)) return;
+    
+    // 获取按钮并禁用，防止重复提交
+    const btn = event?.target;
+    const oldText = btn ? btn.innerText : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = '验收中...';
+    }
     
     try {
         const res = await fetch(`${API_BASE}/tasks/approve`, {
@@ -1907,11 +2076,24 @@ async function approveTask(taskId) {
     } catch(e) {
         console.error(e);
         alert('网络错误');
+    } finally {
+        if (btn) {
+            btn.innerText = oldText;
+            btn.disabled = false;
+        }
     }
 }
 
-async function forceApproveTask(taskId) {
+async function forceApproveTask(taskId, event) {
     if(!confirm(`确认直接验收此任务？\n此操作将跳过用户提交步骤，直接完成任务并发放${getPointsName()}奖励。`)) return;
+    
+    // 获取按钮并禁用，防止重复提交
+    const btn = event?.target;
+    const oldText = btn ? btn.innerText : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = '验收中...';
+    }
     
     try {
         const res = await fetch(`${API_BASE}/tasks/approve`, {
@@ -1935,11 +2117,24 @@ async function forceApproveTask(taskId) {
     } catch(e) {
         console.error(e);
         alert('网络错误');
+    } finally {
+        if (btn) {
+            btn.innerText = oldText;
+            btn.disabled = false;
+        }
     }
 }
 
-async function rejectTask(taskId) {
+async function rejectTask(taskId, event) {
     if(!confirm('确认退回任务？任务将退回给领取者重做。')) return;
+    
+    // 获取按钮并禁用，防止重复提交
+    const btn = event?.target;
+    const oldText = btn ? btn.innerText : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = '退回中...';
+    }
     
     try {
         const res = await fetch(`${API_BASE}/tasks/reject`, {
@@ -1957,11 +2152,28 @@ async function rejectTask(taskId) {
     } catch(e) {
         console.error(e);
         alert('网络错误');
+    } finally {
+        if (btn) {
+            btn.innerText = oldText;
+            btn.disabled = false;
+        }
     }
 }
 
-async function deleteTask(taskId) {
+async function deleteTask(taskId, event) {
     if(!confirm('确认删除此任务？此操作不可恢复。')) return;
+    
+    // 获取按钮并禁用，防止重复提交
+    const btn = event?.target;
+    const oldText = btn ? btn.innerText : '';
+    const oldStyle = btn ? btn.style.cssText : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = '删除中...';
+        btn.style.background = '#999';
+        btn.style.color = '#fff';
+        btn.style.borderColor = '#999';
+    }
     
     try {
         const res = await fetch(`${API_BASE}/tasks/delete`, {
@@ -1979,12 +2191,26 @@ async function deleteTask(taskId) {
     } catch(e) {
         console.error(e);
         alert('网络错误');
+    } finally {
+        if (btn) {
+            btn.style.cssText = oldStyle;
+            btn.innerText = oldText;
+            btn.disabled = false;
+        }
     }
 }
 
-async function completeTask(taskId) {
+async function completeTask(taskId, event) {
     // 兼容旧版：直接完成任务
     if(!confirm('确认完成此任务？')) return;
+    
+    // 获取按钮并禁用，防止重复提交
+    const btn = event?.target;
+    const oldText = btn ? btn.innerText : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = '完成中...';
+    }
     
     const memberName = currentUser ? currentUser.name : '未知用户';
     
@@ -2004,6 +2230,11 @@ async function completeTask(taskId) {
     } catch(e) {
         console.error(e);
         alert('网络错误');
+    } finally {
+        if (btn) {
+            btn.innerText = oldText;
+            btn.disabled = false;
+        }
     }
 }
 
@@ -2139,15 +2370,36 @@ async function submitActivity() {
     }
 }
 
-async function deleteActivity(id) {
+async function deleteActivity(id, event) {
     if(!confirm('确定删除此活动？')) return;
-    await fetch(`${API_BASE}/activities/delete`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(withToken({id}))
-    });
-    fetchActivities();
-    loadSystemInfo(); // Refresh Home list too
+    
+    // 获取按钮并禁用，防止重复提交
+    const btn = event?.target;
+    const oldText = btn ? btn.innerText : '';
+    const oldStyle = btn ? btn.style.cssText : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = '删除中...';
+        btn.style.background = '#999';
+        btn.style.color = '#fff';
+        btn.style.borderColor = '#999';
+    }
+    
+    try {
+        await fetch(`${API_BASE}/activities/delete`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(withToken({id}))
+        });
+        fetchActivities();
+        loadSystemInfo(); // Refresh Home list too
+    } finally {
+        if (btn) {
+            btn.style.cssText = oldStyle;
+            btn.innerText = oldText;
+            btn.disabled = false;
+        }
+    }
 }
 
 // Submissions
@@ -2301,7 +2553,7 @@ async function openActivityDetailView(id) {
             // simplify: just onclick calls a function that finds it by id
             actionsEl.innerHTML = `
                 <button onclick="editActivityFromView(${act.id})" style="background:#4CAF50; padding:6px 14px; font-size:0.9em;">编辑</button>
-                <button onclick="deleteActivityInView(${act.id})" style="background:#e74c3c; padding:6px 14px; font-size:0.9em;">删除</button>
+                <button onclick="deleteActivityInView(${act.id}, event)" style="background:#e74c3c; padding:6px 14px; font-size:0.9em;">删除</button>
             `;
         } else {
             actionsEl.innerHTML = '';
@@ -2317,9 +2569,9 @@ function editActivityFromView(id) {
     if(act) openActivityModal(act);
 }
 
-async function deleteActivityInView(id) {
+async function deleteActivityInView(id, event) {
     toggleModal('modal-activity-view'); // Close view first
-    await deleteActivity(id); // deleteActivity has its own confirm
+    await deleteActivity(id, event); // deleteActivity has its own confirm
 }
 
 async function loadSystemInfo() {
@@ -3233,6 +3485,15 @@ async function exportBackup() {
         return;
     }
     
+    // 获取导出按钮并禁用，防止重复提交
+    const exportBtn = document.querySelector('button[onclick*="exportBackup"]');
+    const importBtn = document.querySelector('button[onclick*="backup-file-input"]');
+    if (exportBtn) {
+        exportBtn.disabled = true;
+        exportBtn.innerText = '导出中...';
+    }
+    if (importBtn) importBtn.disabled = true;
+    
     // 定义要导出的表（按顺序）
     const tables = ['members', 'poems', 'activities', 'tasks', 'finance', 'points_logs', 'login_logs', 'settings', 'wifi_config', 'system_config'];
     const totalTables = tables.length;
@@ -3334,6 +3595,12 @@ async function exportBackup() {
         hideBackupProgress();
         console.error(e);
         alert('导出失败: ' + e.message);
+    } finally {
+        if (exportBtn) {
+            exportBtn.disabled = false;
+            exportBtn.innerText = '下载备份文件';
+        }
+        if (importBtn) importBtn.disabled = false;
     }
 }
 
@@ -3355,6 +3622,15 @@ async function importBackup(event) {
     if(!confirm('导入数据将覆盖现有所有数据，此操作不可逆！\n\n确定要继续吗？')) {
         document.getElementById('backup-file-input').value = '';
         return;
+    }
+    
+    // 获取备份按钮并禁用，防止重复操作
+    const exportBtn = document.querySelector('button[onclick*="exportBackup"]');
+    const importBtn = document.querySelector('button[onclick*="backup-file-input"]');
+    if (exportBtn) exportBtn.disabled = true;
+    if (importBtn) {
+        importBtn.disabled = true;
+        importBtn.innerText = '导入中...';
     }
     
     showBackupProgress('正在导入数据...');
@@ -3473,6 +3749,12 @@ async function importBackup(event) {
         hideBackupProgress();
         console.error(e);
         alert('导入失败: ' + e.message);
+        // 恢复按钮状态
+        if (exportBtn) exportBtn.disabled = false;
+        if (importBtn) {
+            importBtn.disabled = false;
+            importBtn.innerText = '选择备份文件';
+        }
     }
     
     document.getElementById('backup-file-input').value = '';
