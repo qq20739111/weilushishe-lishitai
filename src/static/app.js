@@ -33,8 +33,8 @@ const ROLE_LEVEL = {
     'super_admin': 0,
     'admin': 1,
     'director': 2,
-    'finance': 2,
-    'member': 3
+    'finance': 3,
+    'member': 4
 };
 
 /**
@@ -52,8 +52,13 @@ function canAssignRole(targetRole) {
         return { allowed: false, error: '未登录' };
     }
     
-    const myLevel = ROLE_LEVEL[currentUser.role] ?? 3;
-    const targetLevel = ROLE_LEVEL[targetRole] ?? 3;
+    // 理事只能添加社员，不能添加财务
+    if (currentUser.role === 'director' && targetRole !== 'member') {
+        return { allowed: false, error: '理事只能添加社员' };
+    }
+    
+    const myLevel = ROLE_LEVEL[currentUser.role] ?? 4;
+    const targetLevel = ROLE_LEVEL[targetRole] ?? 4;
     
     // 不能分配比自己权限高或相同的角色（超级管理员除外）
     if (currentUser.role !== 'super_admin' && targetLevel <= myLevel) {
@@ -1174,34 +1179,45 @@ function formatRole(role) {
 
 /**
  * 检查操作者是否可以管理目标成员
- * 规则：不能管理权限比自己高或相同的用户（超管除外）
+ * 规则：
+ * - 超级管理员只能由自己编辑
+ * - 不能管理权限比自己高或相同的用户（超管除外）
  */
-function canManageMember(operatorRole, targetMemberRole) {
-    const operatorLevel = ROLE_LEVEL[operatorRole] ?? 3;
-    const targetLevel = ROLE_LEVEL[targetMemberRole] ?? 3;
+function canManageMember(operatorId, operatorRole, targetMemberId, targetMemberRole) {
+    // 超级管理员只能由自己编辑
+    if (targetMemberRole === 'super_admin') {
+        return operatorId === targetMemberId;
+    }
     
-    // 超级管理员可以管理所有用户
+    // 超级管理员可以管理其他所有用户
     if (operatorRole === 'super_admin') return true;
     
     // 不能管理权限比自己高或相同的用户
+    const operatorLevel = ROLE_LEVEL[operatorRole] ?? 3;
+    const targetLevel = ROLE_LEVEL[targetMemberRole] ?? 3;
     return targetLevel > operatorLevel;
 }
 
 /**
  * 获取当前用户可分配的角色列表
- * 规则：只能分配比自己权限低的角色
+ * 规则：只能分配比自己权限低的角色，理事只能添加社员
  */
 function getAssignableRoles(operatorRole) {
-    const operatorLevel = ROLE_LEVEL[operatorRole] ?? 3;
+    const operatorLevel = ROLE_LEVEL[operatorRole] ?? 4;
     const allRoles = [
         { value: 'admin', label: '管理员', level: 1 },
         { value: 'director', label: '理事', level: 2 },
-        { value: 'finance', label: '财务', level: 2 },
-        { value: 'member', label: '社员', level: 3 }
+        { value: 'finance', label: '财务', level: 3 },
+        { value: 'member', label: '社员', level: 4 }
     ];
     
     // 超级管理员可以分配所有角色（除了超管）
     if (operatorRole === 'super_admin') return allRoles;
+    
+    // 理事只能添加社员
+    if (operatorRole === 'director') {
+        return allRoles.filter(r => r.value === 'member');
+    }
     
     // 其他角色只能分配比自己权限低的角色
     return allRoles.filter(r => r.level > operatorLevel);
@@ -1235,7 +1251,7 @@ async function fetchMembers() {
     const container = document.getElementById('member-list');
     const isLoggedIn = !!currentUser;
     const canEdit = isLoggedIn && ['super_admin', 'admin', 'director'].includes(currentUser?.role);
-    const canDelete = currentUser?.role === 'super_admin';
+    const canDelete = isLoggedIn && ['super_admin', 'admin'].includes(currentUser?.role);
     
     if(_cachedMembers.length === 0) {
         if (isLoggedIn) {
@@ -1249,8 +1265,10 @@ async function fetchMembers() {
     container.innerHTML = _cachedMembers.map(m => {
         // 未登录时只显示雅号，登录后显示雅号或姓名
         const displayName = m.alias || (isLoggedIn ? m.name : '社员');
-        // 检查当前用户是否有权限编辑此成员
-        const canEditThis = canEdit && canManageMember(currentUser?.role, m.role);
+        // 检查当前用户是否有权限编辑此成员（传入操作者ID和目标成员ID）
+        const canEditThis = canEdit && canManageMember(currentUser?.id, currentUser?.role, m.id, m.role);
+        // 删除权限：超管和管理员可删除比自己权限低的用户，但超管不能被删除，也不能删除自己
+        const canDeleteThis = canDelete && m.role !== 'super_admin' && m.id !== currentUser?.id && canManageMember(currentUser?.id, currentUser?.role, m.id, m.role);
         
         if (!isLoggedIn) {
             // 未登录用户只看到雅号和围炉值
@@ -1282,7 +1300,7 @@ async function fetchMembers() {
                 ${canEdit ? (canEditThis 
                     ? `<button class="btn-edit" onclick="editMemberClick(${m.id})">编辑</button>` 
                     : `<button class="btn-edit" style="color:#aaa; border-color:#ccc; cursor:not-allowed;" disabled title="无权编辑此用户">编辑</button>`) : ''}
-                ${canDelete ? `<button class="btn-remove" onclick="deleteMember(${m.id})">移除</button>` : ''}
+                ${canDeleteThis ? `<button class="btn-remove" onclick="deleteMember(${m.id})">移除</button>` : ''}
             </div>
             ` : ''}
         </div>
@@ -1290,6 +1308,7 @@ async function fetchMembers() {
 }
 
 let editingMemberId = null;
+let editingMemberOriginalRole = null;  // 保存编辑时的原始角色
 
 async function openMemberModal(member = null) {
     // 动态设置可选角色（根据当前用户权限）
@@ -1298,6 +1317,7 @@ async function openMemberModal(member = null) {
     
     if (member) {
         editingMemberId = member.id;
+        editingMemberOriginalRole = member.role;  // 保存原始角色
         document.querySelector('#modal-member h3').innerText = '编辑社员资料';
         document.getElementById('m-name').value = member.name;
         document.getElementById('m-alias').value = member.alias || '';
@@ -1308,30 +1328,38 @@ async function openMemberModal(member = null) {
         // 编辑时密码非必填
         document.getElementById('m-password').placeholder = "留空则不修改密码";
         
-        // 编辑时：如果目标用户角色比当前用户高或相同，角色不可修改
-        const canChangeRole = canManageMember(currentUser?.role, member.role);
-        if (canChangeRole) {
-            // 可以修改角色，但只能选择可分配的角色
-            roleSelect.innerHTML = assignableRoles.map(r => 
-                `<option value="${r.value}">${r.label}</option>`
-            ).join('');
-            // 如果当前角色在可选列表中，保持选中
-            if (assignableRoles.some(r => r.value === member.role)) {
-                roleSelect.value = member.role;
-            } else {
-                // 当前角色不在可选列表中（比如正在编辑一个权限更低的用户），添加当前角色作为选项
-                roleSelect.innerHTML = `<option value="${member.role}">${formatRole(member.role)}</option>` + roleSelect.innerHTML;
-                roleSelect.value = member.role;
-            }
-            roleSelect.disabled = false;
-        } else {
-            // 不能修改角色，显示当前角色但禁用
-            roleSelect.innerHTML = `<option value="${member.role}">${formatRole(member.role)}</option>`;
-            roleSelect.value = member.role;
+        // 超级管理员角色不可变更（包括自己编辑自己）
+        if (member.role === 'super_admin') {
+            roleSelect.innerHTML = `<option value="super_admin">超级管理员</option>`;
+            roleSelect.value = 'super_admin';
             roleSelect.disabled = true;
+        } else {
+            // 编辑时：检查是否有权修改此成员的角色
+            const canChangeRole = canManageMember(currentUser?.id, currentUser?.role, member.id, member.role);
+            if (canChangeRole) {
+                // 可以修改角色，但只能选择可分配的角色
+                roleSelect.innerHTML = assignableRoles.map(r => 
+                    `<option value="${r.value}">${r.label}</option>`
+                ).join('');
+                // 如果当前角色在可选列表中，保持选中
+                if (assignableRoles.some(r => r.value === member.role)) {
+                    roleSelect.value = member.role;
+                } else {
+                    // 当前角色不在可选列表中（比如正在编辑一个权限更低的用户），添加当前角色作为选项
+                    roleSelect.innerHTML = `<option value="${member.role}">${formatRole(member.role)}</option>` + roleSelect.innerHTML;
+                    roleSelect.value = member.role;
+                }
+                roleSelect.disabled = false;
+            } else {
+                // 不能修改角色，显示当前角色但禁用
+                roleSelect.innerHTML = `<option value="${member.role}">${formatRole(member.role)}</option>`;
+                roleSelect.value = member.role;
+                roleSelect.disabled = true;
+            }
         }
     } else {
         editingMemberId = null;
+        editingMemberOriginalRole = null;  // 新建时重置原始角色
         document.querySelector('#modal-member h3').innerText = '录入新社员';
         document.getElementById('m-name').value = '';
         document.getElementById('m-alias').value = '';
@@ -1385,11 +1413,15 @@ async function submitMember() {
             birthday: document.getElementById('m-birthday').value
         };
         
-        // 前端角色权限验证
-        const roleCheck = canAssignRole(data.role);
-        if (!roleCheck.allowed) {
-            alert(roleCheck.error);
-            return;
+        // 前端角色权限验证：只在新增或角色变更时验证
+        // 编辑时如果角色没变，不需要验证（允许超管编辑自己的其他资料）
+        const isRoleChanged = editingMemberId ? (data.role !== editingMemberOriginalRole) : true;
+        if (isRoleChanged) {
+            const roleCheck = canAssignRole(data.role);
+            if (!roleCheck.allowed) {
+                alert(roleCheck.error);
+                return;
+            }
         }
         
         // Collect Custom Fields
@@ -1448,10 +1480,22 @@ async function submitMember() {
  * @param {number} id - 社员ID
  */
 async function deleteMember(id) {
+    // 前端检测：不能删除自己
+    if (id === currentUser?.id) {
+        alert('不能删除自己的账号');
+        return;
+    }
+    
     // 前端检测：超级管理员不能被删除
     const member = _cachedMembers.find(m => m.id === id);
     if (member && member.role === 'super_admin') {
         alert('超级管理员不能被删除');
+        return;
+    }
+    
+    // 前端检测：只能删除比自己权限低的用户
+    if (member && !canManageMember(currentUser?.id, currentUser?.role, member.id, member.role)) {
+        alert('无权删除此用户');
         return;
     }
     

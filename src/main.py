@@ -492,6 +492,23 @@ class JsonlDB:
                         debug(f"get_all解析记录失败: {e}", "DB")
         return res
 
+    def get_by_id(self, id_val):
+        """根据ID获取单条记录"""
+        if not file_exists(self.filepath): return None
+        try:
+            with open(self.filepath, 'r') as f:
+                for line in f:
+                    if not line.strip(): continue
+                    try:
+                        record = json.loads(line)
+                        if str(record.get('id')) == str(id_val):
+                            return record
+                    except:
+                        pass
+        except Exception as e:
+            debug(f"get_by_id读取失败: {e}", "DB")
+        return None
+
     def iter_records(self):
         """流式迭代器：逐行读取记录，内存友好（用于聚合计算）"""
         if not file_exists(self.filepath):
@@ -552,8 +569,8 @@ ROLE_LEVEL = {
     'super_admin': 0,
     'admin': 1,
     'director': 2,
-    'finance': 2,
-    'member': 3
+    'finance': 3,
+    'member': 4
 }
 
 def can_assign_role(operator_role, target_role):
@@ -565,8 +582,12 @@ def can_assign_role(operator_role, target_role):
     if target_role == 'super_admin':
         return False, '不能通过此方式添加超级管理员'
     
-    operator_level = ROLE_LEVEL.get(operator_role, 3)
-    target_level = ROLE_LEVEL.get(target_role, 3)
+    # 理事只能添加社员，不能添加财务
+    if operator_role == 'director' and target_role != 'member':
+        return False, '理事只能添加社员'
+    
+    operator_level = ROLE_LEVEL.get(operator_role, 4)
+    target_level = ROLE_LEVEL.get(target_role, 4)
     
     # 非超级管理员不能分配比自己权限高或相同的角色
     if operator_role != 'super_admin' and target_level <= operator_level:
@@ -574,20 +595,27 @@ def can_assign_role(operator_role, target_role):
     
     return True, None
 
-def can_manage_member(operator_role, target_member_role):
+def can_manage_member(operator_id, operator_role, target_member_id, target_member_role):
     """
     检查操作者是否可以管理（编辑/删除）目标成员
     返回: (allowed: bool, error_message: str|None)
-    规则：不能管理权限比自己高或相同的用户（超管除外）
+    规则：
+    - 超级管理员只能由自己编辑
+    - 不能管理权限比自己高或相同的用户（超管除外）
     """
-    operator_level = ROLE_LEVEL.get(operator_role, 3)
-    target_level = ROLE_LEVEL.get(target_member_role, 3)
+    # 超级管理员只能由自己编辑
+    if target_member_role == 'super_admin':
+        if operator_id == target_member_id:
+            return True, None
+        return False, '超级管理员资料只能由其本人修改'
     
-    # 超级管理员可以管理所有用户
+    # 超级管理员可以管理其他所有用户
     if operator_role == 'super_admin':
         return True, None
     
     # 不能管理权限比自己高或相同的用户
+    operator_level = ROLE_LEVEL.get(operator_role, 3)
+    target_level = ROLE_LEVEL.get(target_member_role, 3)
     if target_level <= operator_level:
         return False, '无权管理此用户'
     
@@ -1348,8 +1376,8 @@ def update_member_route(request):
     data = request.json
     mid = data.get('id')
     
-    # 获取操作者角色
-    _, operator_role = get_operator_role(request)
+    # 获取操作者ID和角色
+    operator_id, operator_role = get_operator_role(request)
     
     # 获取目标成员的当前角色，检查是否有权限管理
     target_member = None
@@ -1361,14 +1389,19 @@ def update_member_route(request):
     if not target_member:
         return Response('{"error": "成员不存在"}', 404, {'Content-Type': 'application/json'})
     
-    # 检查是否有权限管理此成员
+    # 检查是否有权限管理此成员（传入操作者ID和目标成员ID）
     target_member_role = target_member.get('role', 'member')
-    allowed, manage_err = can_manage_member(operator_role, target_member_role)
+    allowed, manage_err = can_manage_member(operator_id, operator_role, mid, target_member_role)
     if not allowed:
         return Response(json.dumps({"error": manage_err}), 403, {'Content-Type': 'application/json'})
     
-    # 如果更新角色，验证角色权限
-    if 'role' in data:
+    # 超级管理员角色不可变更（包括自己也不能改）
+    if target_member_role == 'super_admin' and 'role' in data:
+        if data.get('role') != 'super_admin':
+            return Response('{"error": "超级管理员角色不可变更"}', 400, {'Content-Type': 'application/json'})
+    
+    # 如果更新角色且角色发生变化，验证角色权限
+    if 'role' in data and data.get('role') != target_member_role:
         target_role = data.get('role')
         allowed, role_err = can_assign_role(operator_role, target_role)
         if not allowed:
@@ -1401,7 +1434,7 @@ def update_member_route(request):
         points_change = data['points'] - old_points
     
     def updater(m):
-        for k in ['name', 'alias', 'phone', 'role', 'points', 'password', 'custom']:
+        for k in ['name', 'alias', 'phone', 'role', 'points', 'password', 'custom', 'birthday']:
             if k in data: m[k] = data[k]
     
     if db_members.update(mid, updater):
@@ -1453,14 +1486,30 @@ def change_password_route(request):
     return Response('{"error": "更新失败"}', 500, {'Content-Type': 'application/json'})
 
 @api_route('/api/members/delete', methods=['POST'])
-@require_permission(['super_admin'])
+@require_permission(ROLE_ADMIN)
 def delete_member_route(request):
     member_id = request.json.get('id')
     
-    # 检查要删除的成员是否是超级管理员
+    # 获取操作者ID和角色
+    operator_id, operator_role = get_operator_role(request)
+    
+    # 不能删除自己
+    if member_id == operator_id:
+        return Response('{"error": "不能删除自己的账号"}', 400, {'Content-Type': 'application/json'})
+    
+    # 获取要删除的成员信息
     member = db_members.get_by_id(member_id)
-    if member and member.get('role') == 'super_admin':
+    if not member:
+        return Response('{"error": "成员不存在"}', 404, {'Content-Type': 'application/json'})
+    
+    # 检查要删除的成员是否是超级管理员
+    if member.get('role') == 'super_admin':
         return Response('{"error": "超级管理员不能被删除"}', 400, {'Content-Type': 'application/json'})
+    
+    # 检查是否有权限删除此成员（只能删除比自己权限低的用户）
+    allowed, err = can_manage_member(operator_id, operator_role, member_id, member.get('role', 'member'))
+    if not allowed:
+        return Response(json.dumps({"error": err}), 403, {'Content-Type': 'application/json'})
     
     if db_members.delete(member_id): return {"status": "success"}
     return Response("Error", 500)
