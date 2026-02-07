@@ -896,7 +896,7 @@ def random_poem(request):
         import urandom
         total = db_poems.count()
         if total == 0:
-            return None
+            return {}  # 无数据时返回空对象
         # 生成随机索引
         random_index = urandom.getrandbits(16) % total
         # 读取该位置的诗词
@@ -906,10 +906,10 @@ def random_poem(request):
                 if count == random_index:
                     return json.loads(line)
                 count += 1
-        return None
+        return {}  # 未找到时返回空对象
     except Exception as e:
         error(f"获取随机诗歌失败: {e}", "API")
-        return None
+        return {}  # 异常时返回空对象
 
 @api_route('/api/poems', methods=['POST'])
 @require_login

@@ -177,6 +177,9 @@ class Microdot:
         if isinstance(res, dict) or isinstance(res, list):
             import json
             res = Response(json.dumps(res), headers={'Content-Type': 'application/json'})
+        # 防护：处理器返回 None 时返回 204 No Content
+        if res is None:
+            res = Response('', 204)
         
         # 释放请求体内存，防止大请求累积
         req.body = None
