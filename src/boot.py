@@ -104,8 +104,6 @@ def connect_wifi():
         start_ap(config)
 
 def start_ap(config):
-    # Indicate AP status
-    status_led.start_ap_mode()
     watchdog.feed()  # 喂狗
 
     ap_ssid = config.get('ap_ssid', 'PoetrySociety_AP')
@@ -136,13 +134,27 @@ if __name__ == '__main__':
         import main
         # Manually trigger the start if main.py didn't run automatically (which happens on import)
         if hasattr(main, 'app'):
-            # Intelligent LED Status Update (Single LED Logic)
-            if network.WLAN(network.AP_IF).active():
-                 debug("检测到AP模式，设置LED为AP模式（中速呼吸）", "Boot")
-                 status_led.start_ap_mode()
+            # 检测最终网络状态，设置对应的LED指示
+            sta = network.WLAN(network.STA_IF)
+            ap = network.WLAN(network.AP_IF)
+            sta_connected = sta.active() and sta.isconnected()
+            ap_active = ap.active()
+            
+            debug(f"网络状态: STA连接={sta_connected}, AP激活={ap_active}", "Boot")
+            
+            # 根据网络模式设置LED状态
+            if sta_connected and ap_active:
+                # AP+WiFi双模式
+                status_led.start_dual_mode()
+            elif sta_connected:
+                # 仅WiFi模式
+                status_led.start_running()
+            elif ap_active:
+                # 仅AP模式
+                status_led.start_ap_mode()
             else:
-                 debug("检测到STA模式，设置LED为运行模式（慢速呼吸）", "Boot")
-                 status_led.start_running()
+                # 无网络（异常情况）
+                debug("警告: 无网络连接", "Boot")
             
             main.print_system_status()
             watchdog.feed()  # 启动Web服务前喂狗

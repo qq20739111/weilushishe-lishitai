@@ -1,20 +1,22 @@
 # 围炉诗社·理事台 (Weilushishe Lishitai)
 
-![Version](https://img.shields.io/badge/version-v1.0.0-blue)
+![Version](https://img.shields.io/badge/version-v1.1.0-blue)
 ![Platform](https://img.shields.io/badge/platform-ESP32--S2-orange)
-![Environment](https://img.shields.io/badge/environment-MicroPython-green)
+![Environment](https://img.shields.io/badge/environment-MicroPython_v1.25.0-green)
 
 围炉诗社·理事台是一个专为诗社管理设计的嵌入式 Web 应用系统。基于 ESP32-S2 硬件平台和 MicroPython 开发环境，集成了诗歌管理、活动记录、成员管理及财务统计等核心功能，为诗社提供轻量级、便携式的数字化管理方案。
 
 ## 🌟 核心功能
 
-- **藏诗阁 (Poetry Management)**: 诗歌的发布、搜索、分页浏览及本地草稿保存。
+- **藏诗阁 (Poetry Management)**: 诗歌的发布、搜索、分页浏览、随机推荐及本地草稿保存。
 - **活动大厅 (Activity Management)**: 诗社活动的规划、记录与状态追踪。
-- **聊天室 (Chat Room)**: 实时聊天室，消息缓存于内存（128KB），支持登录用户和游客（天干命名，最多10人）。
-- **任务管理 (Task Management)**: 任务的创建、认领、提交与审批流程。
-- **成员名单 (Member Management)**: 成员信息维护与权限角色管理。
+- **聊天室 (Chat Room)**: 实时聊天室，消息缓存于内存（可配置，默认128KB），支持登录用户和游客（天干命名，可配置最大人数）。
+- **任务管理 (Task Management)**: 任务的创建、认领、提交、审批与驳回完整流程。
+- **成员名单 (Member Management)**: 成员信息维护、自定义字段、权限角色管理及密码修改。
 - **财务统计 (Finance Management)**: 简易的收支记录与财务透明化展示。
-- **系统监控 (System Monitoring)**: 实时监控 ESP32 的内存、存储空间及网络状态。
+- **积分系统 (Points System)**: 围炉值积分记录与年度排行榜。
+- **系统监控 (System Monitoring)**: 实时监控 ESP32 的内存、存储空间、运行时长及网络状态。
+- **数据备份 (Data Backup)**: 支持全量备份导出/导入，以及单表数据的独立导出/导入。
 - **WiFi 管理**: 支持 STA/AP 自动切换、静态 IP 配置及自动重连机制。
 - **视觉反馈**: 通过呼吸灯 (BreathLED) 实时反馈系统工作状态。
 
@@ -22,8 +24,11 @@
 
 - **Token 认证**: 基于 SHA256 签名的令牌鉴权机制，支持自动过期检测。
 - **动态有效期**: 登录有效期可在管理后台动态配置（1-365 天）。
+- **密码安全**: SHA256 加盐哈希存储，盐值可自定义配置。
 - **角色权限**: 五级权限体系（超级管理员 > 管理员 > 理事/财务 > 社员），细粒度 API 访问控制。
-- **游客访问**: 未登录用户可浏览首页、诗歌、活动、成员等公开内容。
+- **维护模式**: 支持一键开启维护模式，仅管理员可访问系统。
+- **游客访问**: 可配置是否允许未登录用户浏览公开内容（首页、诗歌、活动、成员等）。
+- **看门狗机制**: 自动喂狗定时器，防止系统死锁。
 
 ## 🛠️ 硬件平台
 
@@ -32,13 +37,23 @@
 - **外设**: 
   - GPIO 15: 蓝色状态指示灯 (高电平点亮)
   - GPIO 0: 系统复位/功能按键 (按下为低电平)
+- **官方文档**: [WEMOS S2 mini](https://www.wemos.cc/en/latest/s2/s2_mini.html)
+
+## 💻 运行环境
+
+- **MicroPython**: v1.25.0 (2025-04-15)
+- **固件标识**: LOLIN_S2_MINI with ESP32-S2FN4R2
+- **推荐固件下载**: [MicroPython ESP32-S2 官方固件](https://micropython.org/download/ESP32_GENERIC_S2/)
 
 ## 🚀 软件架构
 
 - **后端框架**: [Microdot](lib/microdot.py) - 专为微控制器优化的轻量级 Web 框架。
 - **数据库**: **JSONL (JSON Lines)** - 流式数据库系统，支持在极低内存下处理大数据文件。
-- **网络管理**: [WifiConnector](lib/WifiConnector.py) - 增强型网络连接器，支持静态 IP。
-- **前端技术**: 原生 HTML5 / CSS3 / JavaScript (ES6+)，采用 SPA (单页应用) 架构。
+- **网络管理**: [WifiConnector](lib/WifiConnector.py) - 增强型网络连接器，支持静态 IP 及 STA/AP 自动切换。
+- **系统监控**: [SystemStatus](lib/SystemStatus.py) - 状态指示灯控制与系统状态管理。
+- **日志系统**: [Logger](lib/Logger.py) - 分级日志系统，支持开发/生产环境切换。
+- **看门狗**: [Watchdog](lib/Watchdog.py) - 防系统锁死机制，可配置超时时间。
+- **前端技术**: 原生 HTML5 / CSS3 / JavaScript (ES6+)，采用 SPA (单页应用) 架构，集成 [marked.js](https://marked.js.org/) Markdown 渲染。
 
 ## 📂 目录结构
 
@@ -60,7 +75,9 @@
 
 ## 📥 安装与部署
 
-1. **环境准备**: 确保 ESP32-S2 已刷入最新的 MicroPython 固件。
+1. **环境准备**: 确保 ESP32-S2 已刷入 MicroPython v1.25.0 或更高版本固件。
+   - 推荐固件: `ESP32_GENERIC_S2-20250415-v1.25.0.bin`
+   - 刷写工具: `esptool.py` 或 Thonny IDE
 2. **配置文件**: 修改 `data/config.json`，配置您的 WiFi SSID 和密码。
 3. **上传代码**: 使用 Thonny、WebREPL 或 `ampy` 将所有文件上传至 ESP32 根目录。
 4. **运行**: 重启开发板，系统将自动执行 `boot.py` 连接网络并启动 `main.py`。
@@ -78,6 +95,6 @@
 本项目采用 [GPL V3 许可证](LICENSE)。
 
 ---
-**版本**: v1.0.0  
-**更新日期**: 2026年2月3日  
+**版本**: v1.1.0  
+**更新日期**: 2026年2月8日  
 **维护者**: 围炉诗社理事会

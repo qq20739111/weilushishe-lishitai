@@ -10,6 +10,7 @@ alwaysApply: true
 ## 1. 项目概述
 - **项目名称**: 围炉诗社·理事台 (Weilushishe Lishitai)
 - **开发平台**: ESP32S2 WEMOS S2 mini
+  - MicroPython环境：MicroPython v1.25.0 on 2025-04-15; LOLIN_S2_MINI with ESP32-S2FN4R2
   - 主控芯片：ESP32-S2FN4R2
   - 开发版官方文档网址：https://www.wemos.cc/en/latest/s2/s2_mini.html
   - 开发版可用资源:
