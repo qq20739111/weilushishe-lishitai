@@ -2248,19 +2248,21 @@ async function fetchTasks() {
             
             return `
             <div class="card task-item">
-                <div>
-                    <h4>${escapeHtml(t.title)} <span class="task-status ${statusInfo.className}">${statusInfo.label}</span></h4>
-                    <div class="markdown-content">${renderMarkdown(t.description || '')}</div>
-                    <small>
-                        奖励: <span class="task-reward">${t.reward}</span> ${pointsName}
-                        ${t.creator ? `&nbsp;|&nbsp;发布者: ${getSmartDisplayName(t.creator_id, t.creator)}` : ''}
-                        ${t.assignee ? `&nbsp;|&nbsp;领取者: ${getSmartDisplayName(t.assignee_id, t.assignee)}` : ''}
-                    </small>
-                </div>
-                <div style="display:flex; align-items:center;">
-                    ${actionButtons}
-                    ${editBtn}
-                    ${deleteBtn}
+                <h4>${escapeHtml(t.title)} <span class="task-status ${statusInfo.className}">${statusInfo.label}</span></h4>
+                <div class="markdown-content">${renderMarkdown(t.description || '')}</div>
+                <div class="task-meta">
+                    <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
+                        <small>
+                            奖励: <span class="task-reward">${t.reward}</span> ${pointsName}
+                            ${t.creator ? `&nbsp;|&nbsp;发布者: ${getSmartDisplayName(t.creator_id, t.creator)}` : ''}
+                            ${t.assignee ? `&nbsp;|&nbsp;领取者: ${getSmartDisplayName(t.assignee_id, t.assignee)}` : ''}
+                        </small>
+                    </div>
+                    <div style="margin-left:auto; display:flex; align-items:center;">
+                        ${actionButtons}
+                        ${editBtn}
+                        ${deleteBtn}
+                    </div>
                 </div>
             </div>
             `;
@@ -4656,6 +4658,7 @@ function escapeHtml(text) {
 /**
  * Markdown 渲染函数
  * 使用 marked.js 将 Markdown 文本转换为 HTML
+ * 集成 DOMPurify 进行 XSS 防护
  */
 function renderMarkdown(text) {
     if (!text) return '';
@@ -4673,6 +4676,28 @@ function renderMarkdown(text) {
         // 后处理：将空段落转为带空行效果的 <br>
         // 保留连续空行效果：将 <p><br></p> 或 <p></p> 替换为带高度的空行
         html = html.replace(/<p>\s*<br\s*\/?>\s*<\/p>/gi, '<p class="empty-line">&nbsp;</p>');
+        
+        // XSS 防护：使用 DOMPurify 白名单净化 HTML
+        if (typeof DOMPurify !== 'undefined') {
+            html = DOMPurify.sanitize(html, {
+                ALLOWED_TAGS: [
+                    'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+                    'p', 'br', 'hr', 'blockquote',
+                    'ul', 'ol', 'li',
+                    'strong', 'em', 'del', 'code', 'pre',
+                    'a', 'img',
+                    'table', 'thead', 'tbody', 'tr', 'th', 'td',
+                    'input', 'span', 'div'
+                ],
+                ALLOWED_ATTR: [
+                    'href', 'src', 'alt', 'title', 'class',
+                    'type', 'checked', 'disabled'
+                ],
+                ALLOW_DATA_ATTR: false,
+                ALLOW_UNKNOWN_PROTOCOLS: false
+            });
+        }
+        
         return html;
     } catch (e) {
         console.error('Markdown parse error:', e);

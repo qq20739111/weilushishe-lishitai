@@ -617,6 +617,43 @@ button:disabled {
 }
 .poem-body.markdown-content {
     white-space: normal; /* Markdown 自带换行处理，取消 pre-wrap */
+    font-family: "STKaiti", "KaiTi", "楷体", Georgia, serif;
+    font-size: 1.12rem;
+    line-height: 2.1;
+    letter-spacing: 0.06em;
+    color: #1a1a2e;
+    padding: 0.5em 0;
+}
+/* 诗歌段落 - 诗行间留白 */
+.poem-body.markdown-content p {
+    margin: 0.6em 0;
+}
+/* 诗歌标题不需要边线 */
+.poem-body.markdown-content h1,
+.poem-body.markdown-content h2,
+.poem-body.markdown-content h3 {
+    font-family: "STKaiti", "KaiTi", "楷体", Georgia, serif;
+    border: none;
+    padding-bottom: 0;
+    color: var(--text);
+}
+/* 诗歌引用 - 金色边框，古朴风格 */
+.poem-body.markdown-content blockquote {
+    border-left-color: #c9a96e;
+    background: rgba(201, 169, 110, 0.06);
+    font-style: normal;
+}
+/* 诗歌加粗 - 金色强调 */
+.poem-body.markdown-content strong {
+    color: #c9a96e;
+}
+/* 诗歌复选框 - 金色色调 */
+.poem-body.markdown-content input[type="checkbox"] {
+    border-color: #c9a96e;
+}
+.poem-body.markdown-content input[type="checkbox"]:checked {
+    background: #c9a96e;
+    border-color: #c9a96e;
 }
 .poem-meta { 
     display: flex;
@@ -770,8 +807,19 @@ button:disabled {
 /* Tasks */
 .task-item {
     display: flex;
+    flex-direction: column;
+}
+.task-meta {
+    display: flex;
     justify-content: space-between;
     align-items: center;
+    margin-top: 15px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    flex-wrap: wrap;
+    gap: 8px;
 }
 .task-reward {
     color: #e67e22; /* Gold/Orange */
@@ -941,19 +989,15 @@ button:disabled {
     
     /* 事务列表移动端优化 */
     .task-item {
-        flex-direction: column;
-        align-items: stretch;
         gap: 12px;
     }
-    .task-item > div:last-child {
-        display: flex;
-        justify-content: flex-end;
+    .task-meta {
+        flex-direction: column;
+        align-items: stretch;
         gap: 8px;
-        flex-wrap: nowrap;
     }
-    .task-item > div:last-child button {
-        margin-left: 0 !important;
-        margin-right: 0 !important;
+    .task-meta > div:last-child {
+        justify-content: flex-end;
     }
     
     /* 移动端输入框字体优化 - 防止iOS缩放 */
@@ -1032,6 +1076,28 @@ button:disabled {
     }
     .admin-field-row button {
         flex: none;
+    }
+
+    /* Markdown 移动端适配 */
+    .markdown-content {
+        font-size: 0.95rem;
+        line-height: 1.8;
+    }
+    .markdown-content h1 { font-size: 1.3em; }
+    .markdown-content h2 { font-size: 1.15em; }
+    .markdown-content pre {
+        font-size: 0.85em;
+        padding: 10px;
+    }
+    .markdown-content th,
+    .markdown-content td {
+        padding: 6px 8px;
+        font-size: 0.88em;
+    }
+    .poem-body.markdown-content {
+        font-size: 1.05rem;
+        line-height: 1.9;
+        letter-spacing: 0.04em;
     }
 }
 
@@ -2007,150 +2073,245 @@ button:disabled {
 
 /* ==================== Markdown 内容样式 ==================== */
 .markdown-content {
-    line-height: 1.8;
+    line-height: 1.9;
     word-break: break-word;
-    color: #333;
+    color: var(--text);
+    letter-spacing: 0.02em;
 }
 
+/* --- 标题 --- */
 .markdown-content h1,
 .markdown-content h2,
 .markdown-content h3,
 .markdown-content h4,
 .markdown-content h5,
 .markdown-content h6 {
-    margin: 0.6em 0 0.4em;
+    margin: 1em 0 0.5em;
     font-weight: 600;
     line-height: 1.4;
+    color: var(--primary);
 }
 
-.markdown-content h1 { font-size: 1.5em; }
-.markdown-content h2 { font-size: 1.3em; }
+.markdown-content h1 {
+    font-size: 1.5em;
+    padding-bottom: 0.3em;
+    border-bottom: 2px solid var(--accent);
+}
+.markdown-content h2 {
+    font-size: 1.3em;
+    padding-bottom: 0.25em;
+    border-bottom: 1px solid var(--border);
+}
 .markdown-content h3 { font-size: 1.15em; }
 .markdown-content h4 { font-size: 1.05em; }
 
+/* --- 段落 --- */
 .markdown-content p {
-    margin: 1em 0;
+    margin: 0.8em 0;
 }
-
 .markdown-content p.empty-line {
     margin: 0;
     line-height: 1.2;
 }
 
+/* --- 引用块 --- */
 .markdown-content blockquote {
-    border-left: 3px solid var(--accent);
-    padding-left: 12px;
-    margin: 0.8em 0;
-    color: #666;
-    font-style: italic;
+    border-left: 4px solid var(--accent);
+    padding: 0.6em 1em;
+    margin: 1em 0;
+    background: rgba(0, 128, 128, 0.05);
+    border-radius: 0 6px 6px 0;
+    color: var(--text-muted);
+}
+.markdown-content blockquote p {
+    margin: 0.4em 0;
 }
 
+/* --- 行内代码 --- */
 .markdown-content code {
-    background: #f5f5f5;
+    background: rgba(0, 128, 128, 0.08);
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: 4px;
     font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-    font-size: 0.9em;
+    font-size: 0.88em;
+    color: #006666;
 }
 
+/* --- 代码块 --- */
 .markdown-content pre {
-    background: #f5f5f5;
-    padding: 12px;
-    border-radius: 6px;
+    background: #f6f8fa;
+    padding: 14px 16px;
+    border-radius: 8px;
     overflow-x: auto;
-    margin: 0.8em 0;
+    -webkit-overflow-scrolling: touch;
+    margin: 1em 0;
+    border: 1px solid #e8eaed;
 }
-
 .markdown-content pre code {
     background: none;
     padding: 0;
+    color: inherit;
+    font-size: 0.9em;
+    line-height: 1.6;
 }
 
+/* --- 水平线 --- */
 .markdown-content hr {
     border: none;
-    border-top: 1px solid #ddd;
-    margin: 1em 0;
+    height: 1px;
+    background: linear-gradient(to right, transparent, var(--border), transparent);
+    margin: 1.5em 0;
 }
 
+/* --- 链接 --- */
 .markdown-content a {
-    color: var(--primary-color);
-    text-decoration: underline;
+    color: var(--accent);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.2s;
 }
-
 .markdown-content a:hover {
-    opacity: 0.8;
+    border-bottom-color: var(--accent);
 }
 
+/* --- 图片 --- */
 .markdown-content img {
     max-width: 100%;
     height: auto;
-    border-radius: 6px;
-    margin: 0.5em 0;
+    border-radius: 8px;
+    margin: 0.8em 0;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
 }
 
+/* --- 表格 --- */
 .markdown-content table {
     width: 100%;
     border-collapse: collapse;
     margin: 1em 0;
     font-size: 0.95em;
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }
-
 .markdown-content th,
 .markdown-content td {
-    border: 1px solid #ddd;
+    border: 1px solid var(--border);
     padding: 8px 12px;
     text-align: left;
+    white-space: nowrap;
 }
-
 .markdown-content th {
-    background: #f5f5f5;
+    background: #f0f2f5;
     font-weight: 600;
+    color: var(--primary);
+}
+.markdown-content tr:nth-child(even) {
+    background: #fafbfc;
 }
 
+/* --- 列表 --- */
 .markdown-content ul,
 .markdown-content ol {
-    padding-left: 1.5em;
-    margin: 0.5em 0;
+    padding-left: 1.8em;
+    margin: 0.6em 0;
 }
-
 .markdown-content li {
-    margin: 0.3em 0;
+    margin: 0.4em 0;
+    line-height: 1.7;
+}
+.markdown-content li > ul,
+.markdown-content li > ol {
+    margin: 0.2em 0;
 }
 
+/* --- 文本修饰 --- */
 .markdown-content del {
     text-decoration: line-through;
     color: #999;
 }
-
 .markdown-content strong {
     font-weight: 600;
+    color: var(--text);
 }
-
 .markdown-content em {
     font-style: italic;
 }
 
-/* 任务列表复选框 */
+/* --- 任务列表复选框 --- */
+.markdown-content li:has(> input[type="checkbox"]) {
+    list-style: none;
+    margin-left: -1em;
+}
 .markdown-content input[type="checkbox"] {
     -webkit-appearance: none;
     -moz-appearance: none;
     appearance: none;
     width: 16px;
     height: 16px;
-    min-width: 12px;
+    min-width: 16px;
     padding: 0;
-    margin: 0 5px 0 0;
-    border: 1.5px solid var(--text);
-    border-radius: 2px;
+    margin: 0 6px 0 0;
+    border: 1.5px solid var(--accent);
+    border-radius: 3px;
     vertical-align: middle;
-    cursor: pointer;
+    cursor: default;
     background: #fff;
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    flex-shrink: 0;
 }
-
 .markdown-content input[type="checkbox"]:checked {
     background: var(--accent);
     border-color: var(--accent);
+}
+.markdown-content input[type="checkbox"]:checked::after {
+    content: '';
+    display: block;
+    width: 4px;
+    height: 8px;
+    border: solid #fff;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+    margin-top: -1px;
+}
+
+/* --- 事务描述 --- */
+.task-item .markdown-content {
+    font-size: 0.95rem;
+    line-height: 1.75;
+    color: #555;
+}
+.task-item .markdown-content p {
+    margin: 0.5em 0;
+}
+.task-item .markdown-content ul,
+.task-item .markdown-content ol {
+    background: #f8f9fa;
+    padding: 0.6em 0.8em 0.6em 2.2em;
+    border-radius: 6px;
+}
+
+/* --- 活动详情 --- */
+#view-act-container .markdown-content {
+    line-height: 1.85;
+}
+#view-act-container .markdown-content img {
+    display: block;
+    margin: 1.2em auto;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+}
+#view-act-container .markdown-content strong {
+    color: var(--accent);
+}
+
+/* --- 首页推荐诗歌 --- */
+#daily-poem .markdown-content {
+    font-family: "STKaiti", "KaiTi", "楷体", Georgia, serif;
+    line-height: 2.0;
+    letter-spacing: 0.05em;
+    font-size: 1.05rem;
 }
 
 /* ============================================================================

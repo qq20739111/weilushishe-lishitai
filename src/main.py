@@ -1040,6 +1040,8 @@ def app_js(request): return send_file('static/app.js')
 def logo_png(request): return send_file('static/logo.png')
 @app.route('/static/marked.umd.js')
 def marked_js(request): return send_file('static/marked.umd.js')
+@app.route('/static/purify.min.js')
+def purify_js(request): return send_file('static/purify.min.js')
 
 # --- Poems API ---
 @api_route('/api/poems', methods=['GET'])
