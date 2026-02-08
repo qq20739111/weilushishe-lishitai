@@ -733,6 +733,7 @@ def get_current_time():
 # ============================================================================
 
 # 权限级别定义
+ROLE_SUPER_ADMIN = ['super_admin']  # 超级管理员级别：仅超管
 ROLE_ADMIN = ['super_admin', 'admin']  # 管理员级别：超管、管理员
 ROLE_DIRECTOR = ['super_admin', 'admin', 'director']  # 理事级别：超管、管理员、理事
 ROLE_FINANCE = ['super_admin', 'admin', 'finance']  # 财务级别：超管、管理员、财务
@@ -2009,9 +2010,15 @@ def settings_system(request):
         if not ok:
             return err
         if 'system_name' in data:
-            s['system_name'] = data['system_name']
+            sn = data['system_name'].strip() if isinstance(data['system_name'], str) else ''
+            if not sn or len(sn) > 32:
+                return Response('{"error": "系统名称为必填项且不超过32个字符"}', 400, {'Content-Type': 'application/json'})
+            s['system_name'] = sn
         if 'points_name' in data:
-            s['points_name'] = data['points_name']
+            pn = data['points_name'].strip() if isinstance(data['points_name'], str) else ''
+            if not pn or len(pn) > 10:
+                return Response('{"error": "积分名称为必填项且不超过10个字符"}', 400, {'Content-Type': 'application/json'})
+            s['points_name'] = pn
         if 'maintenance_mode' in data:
             s['maintenance_mode'] = bool(data['maintenance_mode'])
         if 'allow_guest' in data:
@@ -2046,23 +2053,40 @@ def settings_system(request):
         return {"status": "success"}
 
 @api_route('/api/settings/salt', methods=['GET', 'POST'])
-@require_permission(ROLE_ADMIN)
+@require_permission(ROLE_SUPER_ADMIN)
 def settings_salt(request):
-    """获取或更新密码盐值（管理员权限）"""
+    """获取或更新密码盐值（超级管理员权限）"""
     s = get_settings()
     if request.method == 'GET':
         return {"password_salt": s.get('password_salt', 'weilu2018')}
     else:
         data = request.json
-        if 'password_salt' in data:
-            s['password_salt'] = data['password_salt']
-            save_settings(s)
+        new_salt = data.get('password_salt', '').strip() if isinstance(data.get('password_salt', ''), str) else ''
+        if not new_salt or len(new_salt) < 32 or len(new_salt) > 1024:
+            return Response('{"error": "Salt长度必须为32-1024个字符"}', 400, {'Content-Type': 'application/json'})
+        
+        # 修改Salt时必须同时提供新的超级管理员密码
+        new_pwd = data.get('super_admin_password', '')
+        if not new_pwd or len(new_pwd) < 6 or len(new_pwd) > 32:
+            return Response('{"error": "请提供新的超级管理员密码（6-32位）"}', 400, {'Content-Type': 'application/json'})
+        
+        # 先更新Salt
+        s['password_salt'] = new_salt
+        save_settings(s)
+        
+        # 用新Salt哈希超级管理员密码并更新
+        new_hashed = hash_password(new_pwd)
+        def updater(m):
+            m['password'] = new_hashed
+        db_members.update(1, updater)  # 超级管理员ID固定为1
+        gc.collect()
+        
         return {"status": "success"}
 
 @api_route('/api/settings/token_expire', methods=['GET', 'POST'])
-@require_permission(ROLE_ADMIN)
+@require_permission(ROLE_SUPER_ADMIN)
 def settings_token_expire(request):
-    """获取或更新登录有效期（管理员权限）"""
+    """获取或更新登录有效期（超级管理员权限）"""
     s = get_settings()
     if request.method == 'GET':
         return {"token_expire_days": s.get('token_expire_days', DEFAULT_TOKEN_EXPIRE_DAYS)}
@@ -2096,7 +2120,7 @@ def get_wifi_config():
                 'sta_dns': config.get('sta_dns', '8.8.8.8'),
                 'ap_ssid': config.get('ap_ssid', '围炉诗社小热点'),
                 'ap_password': config.get('ap_password', ''),
-                'ap_ip': config.get('ap_ip', '192.168.18.1')
+                'ap_ip': config.get('ap_ip', '192.168.1.68')
             }
     except:
         return {}
@@ -2137,10 +2161,52 @@ def wifi_config(request):
             "sta_dns": config.get('sta_dns', '8.8.8.8'),
             "ap_ssid": config.get('ap_ssid', '围炉诗社小热点'),
             "ap_password": '********' if config.get('ap_password') else '',
-            "ap_ip": config.get('ap_ip', '192.168.18.1')
+            "ap_ip": config.get('ap_ip', '192.168.1.68')
         }
     else:
         data = request.json
+        
+        # 后端数据校验
+        wifi_ssid = data.get('wifi_ssid', '')
+        if not wifi_ssid or len(wifi_ssid) > 32:
+            return Response('{"error": "WiFi名称为必填项且不超过32字符"}', 400, {'Content-Type': 'application/json'})
+        
+        wifi_pwd = data.get('wifi_password', '')
+        if wifi_pwd and wifi_pwd != '********' and (len(wifi_pwd) < 8 or len(wifi_pwd) > 63):
+            return Response('{"error": "WiFi密码长度必须为8-63个字符"}', 400, {'Content-Type': 'application/json'})
+        
+        ap_ssid = data.get('ap_ssid', '')
+        if ap_ssid and len(ap_ssid) > 32:
+            return Response('{"error": "热点名称不能超过32个字符"}', 400, {'Content-Type': 'application/json'})
+        
+        ap_pwd = data.get('ap_password', '')
+        if ap_pwd and ap_pwd != '********' and (len(ap_pwd) < 8 or len(ap_pwd) > 63):
+            return Response('{"error": "热点密码长度必须为8-63个字符"}', 400, {'Content-Type': 'application/json'})
+        
+        # IPv4格式校验辅助函数
+        def _valid_ipv4(ip):
+            parts = ip.split('.')
+            if len(parts) != 4:
+                return False
+            for p in parts:
+                if not p.isdigit() or int(p) < 0 or int(p) > 255:
+                    return False
+            return True
+        
+        # 静态IP模式下校验IP字段
+        if data.get('sta_use_static_ip'):
+            for field, label in [('sta_ip', 'IP地址'), ('sta_subnet', '子网掩码'), ('sta_gateway', '网关'), ('sta_dns', 'DNS')]:
+                val = data.get(field, '')
+                if not val:
+                    return Response('{"error": "静态IP模式下%s为必填项"}' % label, 400, {'Content-Type': 'application/json'})
+                if not _valid_ipv4(val):
+                    return Response('{"error": "%s格式不正确"}' % label, 400, {'Content-Type': 'application/json'})
+        
+        # AP IP格式校验
+        ap_ip = data.get('ap_ip', '')
+        if ap_ip and not _valid_ipv4(ap_ip):
+            return Response('{"error": "AP模式IP地址格式不正确"}', 400, {'Content-Type': 'application/json'})
+        
         config = get_wifi_config()
         
         # 更新WiFi STA配置
@@ -2272,7 +2338,7 @@ def sys_stats(request):
         return {}
 
 @api_route('/api/backup/export')
-@require_permission(ROLE_ADMIN)
+@require_permission(ROLE_SUPER_ADMIN)
 def backup_export(request):
     """导出全站数据备份（管理员权限）"""
     try:
@@ -2288,7 +2354,7 @@ def backup_export(request):
             "sta_dns": wifi_config.get('sta_dns', '8.8.8.8'),
             "ap_ssid": wifi_config.get('ap_ssid', ''),
             "ap_password": wifi_config.get('ap_password', ''),
-            "ap_ip": wifi_config.get('ap_ip', '192.168.18.1')
+            "ap_ip": wifi_config.get('ap_ip', '192.168.1.68')
         }
         
         # 获取系统配置（debug_mode, watchdog配置）
@@ -2326,7 +2392,7 @@ def backup_export(request):
         return Response('{"error": "导出失败"}', 500, {'Content-Type': 'application/json'})
 
 @api_route('/api/backup/import', methods=['POST'])
-@require_permission(ROLE_ADMIN)
+@require_permission(ROLE_SUPER_ADMIN)
 def backup_import(request):
     """导入数据备份（管理员权限）"""
     try:
@@ -2449,7 +2515,7 @@ def backup_import(request):
             existing_config['ap_ssid'] = new_config.get('ap_ssid', existing_config.get('ap_ssid', ''))
             if 'ap_password' in new_config and new_config['ap_password']:
                 existing_config['ap_password'] = new_config['ap_password']
-            existing_config['ap_ip'] = new_config.get('ap_ip', '192.168.18.1')
+            existing_config['ap_ip'] = new_config.get('ap_ip', '192.168.1.68')
             save_wifi_config(existing_config)
             data['wifi_config'] = None
             gc.collect()
@@ -2494,13 +2560,13 @@ BACKUP_TABLES = {
 }
 
 @api_route('/api/backup/tables')
-@require_permission(ROLE_ADMIN)
+@require_permission(ROLE_SUPER_ADMIN)
 def backup_list_tables(request):
     """获取可备份的表列表（管理员权限）"""
     return {"tables": list(BACKUP_TABLES.keys()) + ['settings', 'wifi_config', 'system_config']}
 
 @api_route('/api/backup/export-table')
-@require_permission(ROLE_ADMIN)
+@require_permission(ROLE_SUPER_ADMIN)
 def backup_export_table(request):
     """分表导出（管理员权限）
     查询参数：name=表名, page=页码(可选), limit=每页条数(可选,默认100)
@@ -2541,7 +2607,7 @@ def backup_export_table(request):
                 "sta_dns": wifi_config.get('sta_dns', '8.8.8.8'),
                 "ap_ssid": wifi_config.get('ap_ssid', ''),
                 "ap_password": wifi_config.get('ap_password', ''),
-                "ap_ip": wifi_config.get('ap_ip', '192.168.18.1')
+                "ap_ip": wifi_config.get('ap_ip', '192.168.1.68')
             }, "page": 1, "total": 1, "hasMore": False}
         
         elif table == 'system_config':
@@ -2564,7 +2630,7 @@ def backup_export_table(request):
         return Response(f'{{"error": "导出失败: {str(e)}"}}', 500, {'Content-Type': 'application/json'})
 
 @api_route('/api/backup/import-table', methods=['POST'])
-@require_permission(ROLE_ADMIN)
+@require_permission(ROLE_SUPER_ADMIN)
 def backup_import_table(request):
     """分表导入（管理员权限）
     查询参数：name=表名
@@ -2640,7 +2706,7 @@ def backup_import_table(request):
             existing_config['ap_ssid'] = table_data.get('ap_ssid', existing_config.get('ap_ssid', ''))
             if 'ap_password' in table_data and table_data['ap_password']:
                 existing_config['ap_password'] = table_data['ap_password']
-            existing_config['ap_ip'] = table_data.get('ap_ip', '192.168.18.1')
+            existing_config['ap_ip'] = table_data.get('ap_ip', '192.168.1.68')
             save_wifi_config(existing_config)
             gc.collect()
             return {"status": "success", "table": table}

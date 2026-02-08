@@ -82,6 +82,48 @@ const VALIDATION_RULES = {
             min: '积分值不能小于0',
             max: '积分值不能超过999999'
         }
+    },
+    wifi_ssid: {
+        required: true,
+        minLength: 1,
+        maxLength: 32,
+        errorMsg: {
+            required: 'WiFi名称为必填项',
+            minLength: 'WiFi名称不能为空',
+            maxLength: 'WiFi名称不能超过32个字符'
+        }
+    },
+    wifi_password: {
+        required: false,
+        minLength: 8,
+        maxLength: 63,
+        errorMsg: {
+            minLength: 'WiFi密码长度必须为8-63个字符',
+            maxLength: 'WiFi密码长度必须为8-63个字符'
+        }
+    },
+    ap_ssid: {
+        required: false,
+        maxLength: 32,
+        errorMsg: {
+            maxLength: '热点名称不能超过32个字符'
+        }
+    },
+    ap_password: {
+        required: false,
+        minLength: 8,
+        maxLength: 63,
+        errorMsg: {
+            minLength: '热点密码长度必须为8-63个字符',
+            maxLength: '热点密码长度必须为8-63个字符'
+        }
+    },
+    ipv4: {
+        required: false,
+        type: 'ipv4',
+        errorMsg: {
+            format: '请输入有效的IPv4地址（如192.168.1.1）'
+        }
     }
 };
 
@@ -218,6 +260,14 @@ function validateField(fieldName, value, rule, context = {}) {
         today.setHours(0, 0, 0, 0);
         if (inputDate > today) {
             return { valid: false, error: rule.errorMsg?.maxDate || '日期不能晚于今天' };
+        }
+    }
+    
+    // IPv4地址验证
+    if (rule.type === 'ipv4') {
+        const ipv4Pattern = /^((25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(25[0-5]|2[0-4]\d|[01]?\d\d?)$/;
+        if (!ipv4Pattern.test(value)) {
+            return { valid: false, error: rule.errorMsg?.format || '请输入有效的IPv4地址' };
         }
     }
     
@@ -1036,10 +1086,15 @@ function showSection(id) {
             renderAdminSettings();
             // 系统页权限控制
             const role = currentUser?.role;
+            const isSuperAdmin = role === 'super_admin';
             const isAdmin = ['super_admin', 'admin'].includes(role);
             const isDirector = ['super_admin', 'admin', 'director'].includes(role);
             
-            // 管理员级别栏目（WiFi设置、安全设置）
+            // 超级管理员级别栏目（安全设置、数据备份）
+            document.querySelectorAll('.super-admin-only-card').forEach(card => {
+                card.classList.toggle('hidden', !isSuperAdmin);
+            });
+            // 管理员级别栏目（WiFi设置）
             document.querySelectorAll('.admin-only-card').forEach(card => {
                 card.classList.toggle('hidden', !isAdmin);
             });
@@ -3433,6 +3488,7 @@ async function saveSystemName() {
     const input = document.getElementById('setting-system-name');
     const value = input.value.trim();
     if(!value) { alert('系统名称不能为空'); return; }
+    if(value.length > 32) { alert('系统名称不能超过32个字符'); return; }
     
     try {
         const res = await fetch(`${API_BASE}/settings/system`, {
@@ -3454,6 +3510,7 @@ async function savePointsName() {
     const input = document.getElementById('setting-points-name');
     const value = input.value.trim();
     if(!value) { alert('积分名称不能为空'); return; }
+    if(value.length > 10) { alert('积分名称不能超过10个字符'); return; }
     
     try {
         const res = await fetch(`${API_BASE}/settings/system`, {
@@ -3482,18 +3539,30 @@ async function savePasswordSalt() {
     const input = document.getElementById('setting-password-salt');
     const value = input.value.trim();
     if(!value) { alert('Salt不能为空'); return; }
+    if(value.length < 32 || value.length > 1024) { alert('Salt长度必须为32-1024个字符'); return; }
     
-    if(!confirm('修改Salt后，所有现有密码将失效，用户需要重置密码！确定要修改吗？')) return;
+    // 要求输入新的超级管理员密码
+    const newPwd = prompt('修改Salt后所有现有密码将失效！\n请输入新的超级管理员密码（至少6位）：');
+    if(newPwd === null) return;  // 用户取消
+    if(!newPwd || newPwd.length < 6 || newPwd.length > 32) {
+        alert('超级管理员密码长度必须为6-32位');
+        return;
+    }
+    
+    if(!confirm('确认修改Salt并重置超级管理员密码？\n其他所有用户密码将失效，需由管理员重新设置。')) return;
     
     try {
         const res = await fetchWithAuth(`${API_BASE}/settings/salt`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ password_salt: value })
+            body: JSON.stringify({ password_salt: value, super_admin_password: newPwd })
         });
         if(res.ok) {
             _systemSettings.password_salt = value;
-            alert('Salt已更新！所有用户需要重置密码。');
+            alert('Salt已更新，超级管理员密码已重置。\n其他用户需由管理员重新设置密码。');
+            // Salt变更后当前token可能失效，强制重新登录
+            localStorage.removeItem('user');
+            location.reload();
         } else {
             const err = await res.json().catch(() => ({}));
             alert('保存失败: ' + (err.error || '权限不足'));
@@ -3891,7 +3960,7 @@ async function loadWifiConfig() {
         
         if(apSsidInput) apSsidInput.value = config.ap_ssid || '';
         if(apPwdInput) apPwdInput.value = '';  // 不显示密码
-        if(apIpInput) apIpInput.value = config.ap_ip || '192.168.18.1';
+        if(apIpInput) apIpInput.value = config.ap_ip || '192.168.1.68';
         
     } catch(e) {
         console.error(e);
@@ -3900,26 +3969,71 @@ async function loadWifiConfig() {
 
 async function saveWifiConfig() {
     const staticRadio = document.querySelector('input[name="wifi-ip-mode"][value="static"]');
+    const isStaticIp = staticRadio?.checked || false;
+    
     const config = {
-        wifi_ssid: document.getElementById('wifi-ssid')?.value || '',
-        sta_use_static_ip: staticRadio?.checked || false,
-        sta_ip: document.getElementById('wifi-sta-ip')?.value || '',
-        sta_subnet: document.getElementById('wifi-sta-subnet')?.value || '255.255.255.0',
-        sta_gateway: document.getElementById('wifi-sta-gateway')?.value || '',
-        sta_dns: document.getElementById('wifi-sta-dns')?.value || '8.8.8.8',
-        ap_ssid: document.getElementById('wifi-ap-ssid')?.value || '',
-        ap_ip: document.getElementById('wifi-ap-ip')?.value || '192.168.18.1'
+        wifi_ssid: document.getElementById('wifi-ssid')?.value?.trim() || '',
+        sta_use_static_ip: isStaticIp,
+        sta_ip: document.getElementById('wifi-sta-ip')?.value?.trim() || '',
+        sta_subnet: document.getElementById('wifi-sta-subnet')?.value?.trim() || '255.255.255.0',
+        sta_gateway: document.getElementById('wifi-sta-gateway')?.value?.trim() || '',
+        sta_dns: document.getElementById('wifi-sta-dns')?.value?.trim() || '8.8.8.8',
+        ap_ssid: document.getElementById('wifi-ap-ssid')?.value?.trim() || '',
+        ap_ip: document.getElementById('wifi-ap-ip')?.value?.trim() || '192.168.1.68'
     };
     
     // 只有输入了密码才发送
-    const wifiPwd = document.getElementById('wifi-password')?.value;
+    const wifiPwd = document.getElementById('wifi-password')?.value || '';
     if(wifiPwd) config.wifi_password = wifiPwd;
     
-    const apPwd = document.getElementById('wifi-ap-password')?.value;
+    const apPwd = document.getElementById('wifi-ap-password')?.value || '';
     if(apPwd) config.ap_password = apPwd;
     
-    if(!config.wifi_ssid) {
-        alert('请输入WiFi名称');
+    // 构建动态验证规则
+    const wifiRules = {
+        wifi_ssid: VALIDATION_RULES.wifi_ssid
+    };
+    // WiFi密码：非空时验证长度
+    if(wifiPwd) {
+        wifiRules.wifi_password = VALIDATION_RULES.wifi_password;
+    }
+    // AP SSID
+    if(config.ap_ssid) {
+        wifiRules.ap_ssid = VALIDATION_RULES.ap_ssid;
+    }
+    // AP密码：非空时验证长度
+    if(apPwd) {
+        wifiRules.ap_password = VALIDATION_RULES.ap_password;
+    }
+    // 静态IP模式下：IP/子网/网关/DNS 必填且格式校验
+    if(isStaticIp) {
+        wifiRules.sta_ip = { required: true, type: 'ipv4', errorMsg: { required: '静态IP地址为必填项', format: '请输入有效的IP地址（如192.168.1.100）' } };
+        wifiRules.sta_subnet = { required: true, type: 'ipv4', errorMsg: { required: '子网掩码为必填项', format: '请输入有效的子网掩码（如255.255.255.0）' } };
+        wifiRules.sta_gateway = { required: true, type: 'ipv4', errorMsg: { required: '网关地址为必填项', format: '请输入有效的网关地址（如192.168.1.1）' } };
+        wifiRules.sta_dns = { required: true, type: 'ipv4', errorMsg: { required: 'DNS服务器为必填项', format: '请输入有效的DNS地址（如8.8.8.8）' } };
+    }
+    // AP IP：非空时格式校验
+    if(config.ap_ip) {
+        wifiRules.ap_ip = { required: false, type: 'ipv4', errorMsg: { format: '请输入有效的AP模式IP地址（如192.168.1.68）' } };
+    }
+    
+    // 构建验证数据
+    const formData = {
+        wifi_ssid: config.wifi_ssid,
+        wifi_password: wifiPwd,
+        ap_ssid: config.ap_ssid,
+        ap_password: apPwd,
+        sta_ip: config.sta_ip,
+        sta_subnet: config.sta_subnet,
+        sta_gateway: config.sta_gateway,
+        sta_dns: config.sta_dns,
+        ap_ip: config.ap_ip
+    };
+    
+    // 执行验证
+    const validation = validateForm(formData, wifiRules);
+    if(!validation.valid) {
+        alert(validation.firstError);
         return;
     }
     

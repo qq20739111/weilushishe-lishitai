@@ -108,7 +108,7 @@ def start_ap(config):
 
     ap_ssid = config.get('ap_ssid', 'PoetrySociety_AP')
     ap_password = config.get('ap_password', 'admin1234')
-    ap_ip = config.get('ap_ip', '192.168.18.1')
+    ap_ip = config.get('ap_ip', '192.168.1.68')
     
     # Custom IP configuration for AP (从配置读取)
     ap_ip_config = {
