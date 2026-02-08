@@ -3715,6 +3715,7 @@ async function addCustomFieldInput() {
     const required = requiredCheckbox ? requiredCheckbox.checked : false;
 
     if(!label) return;
+    if(label.length > 10) return alert('字段名称不能超过10个字符');
     
     // Check dupe
     if(_customFields.find(f => f.label === label)) return alert('字段名已存在');
@@ -3816,7 +3817,7 @@ function editCustomField(fieldId) {
     item.classList.add('editing');
     item.innerHTML = `
         <div class="custom-field-edit-form">
-            <input type="text" class="edit-field-name" value="${field.label}" maxlength="20" placeholder="字段名称">
+            <input type="text" class="edit-field-name" value="${field.label}" maxlength="10" placeholder="字段名称">
             <span class="custom-field-type-readonly">${typeText}</span>
             <label class="required-toggle">
                 <div class="toggle-switch">
@@ -3843,6 +3844,11 @@ async function saveCustomFieldEdit(fieldId) {
     const newLabel = nameInput.value.trim();
     if(!newLabel) {
         alert('字段名称不能为空');
+        nameInput.focus();
+        return;
+    }
+    if(newLabel.length > 10) {
+        alert('字段名称不能超过10个字符');
         nameInput.focus();
         return;
     }

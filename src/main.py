@@ -1995,6 +1995,11 @@ def settings_fields(request):
             fields = data
         else:
             fields = data.get('fields', [])
+        # 校验字段名称长度
+        for f in fields:
+            label = f.get('label', '')
+            if not label or len(label) > 10:
+                return Response('{"error": "字段名称不能为空且不超过10个字符"}', 400, {'Content-Type': 'application/json'})
         s['custom_member_fields'] = fields
         save_settings(s)
         return {"status": "success"}
