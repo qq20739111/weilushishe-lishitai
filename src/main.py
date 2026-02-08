@@ -134,6 +134,179 @@ def verify_password(password, hashed):
     return password == hashed
 
 # ============================================================================
+# 数据验证函数
+# ============================================================================
+
+def validate_phone(phone):
+    """
+    验证手机号格式
+    规则: 11位数字，以1开头，第二位为3-9
+    返回: (valid: bool, error: str|None)
+    """
+    if not phone:
+        return False, '手机号为必填项'
+    if not isinstance(phone, str):
+        phone = str(phone)
+    # 简化正则：11位数字，1开头，第二位3-9
+    if len(phone) != 11:
+        return False, '请输入有效的手机号码（11位）'
+    if phone[0] != '1' or phone[1] not in '3456789':
+        return False, '请输入有效的手机号码'
+    for c in phone:
+        if c not in '0123456789':
+            return False, '请输入有效的手机号码'
+    return True, None
+
+def validate_password_strength(password):
+    """
+    验证密码强度
+    规则: 至少6位，包含至少两种字符类型（数字、小写字母、大写字母、特殊字符）
+    返回: (valid: bool, error: str|None)
+    """
+    if not password:
+        return False, '密码为必填项'
+    if len(password) < 6:
+        return False, '密码长度至少6位'
+    if len(password) > 32:
+        return False, '密码长度不能超过32位'
+    
+    # 检查字符类型
+    type_count = 0
+    has_digit = False
+    has_lower = False
+    has_upper = False
+    has_special = False
+    
+    for c in password:
+        if c.isdigit():
+            has_digit = True
+        elif c.islower():
+            has_lower = True
+        elif c.isupper():
+            has_upper = True
+        else:
+            has_special = True
+    
+    type_count = sum([has_digit, has_lower, has_upper, has_special])
+    if type_count < 2:
+        return False, '密码需包含至少两种字符类型（数字、小写字母、大写字母、特殊字符）'
+    
+    return True, None
+
+def validate_name(name, max_length=10):
+    """
+    验证姓名
+    规则: 必填，1-10字符
+    返回: (valid: bool, error: str|None)
+    """
+    if not name:
+        return False, '姓名为必填项'
+    if len(name) > max_length:
+        return False, f'姓名不能超过{max_length}个字符'
+    return True, None
+
+def validate_alias(alias, max_length=10):
+    """
+    验证雅号
+    规则: 可选，最长10字符
+    返回: (valid: bool, error: str|None)
+    """
+    if alias and len(alias) > max_length:
+        return False, f'雅号不能超过{max_length}个字符'
+    return True, None
+
+def validate_birthday(birthday):
+    """
+    验证生日
+    规则: 可选，格式YYYY-MM-DD，只校验格式正确性
+    返回: (valid: bool, error: str|None)
+    """
+    if not birthday:
+        return True, None  # 可选字段
+    
+    # 简单格式检查
+    if len(birthday) != 10 or birthday[4] != '-' or birthday[7] != '-':
+        return False, '日期格式不正确，应为YYYY-MM-DD'
+    
+    try:
+        year = int(birthday[:4])
+        month = int(birthday[5:7])
+        day = int(birthday[8:10])
+        
+        # 基本范围检查
+        if month < 1 or month > 12:
+            return False, '月份应在1-12之间'
+        if day < 1 or day > 31:
+            return False, '日期应在1-31之间'
+        
+    except (ValueError, TypeError):
+        return False, '日期格式不正确'
+    
+    return True, None
+
+def validate_points(points):
+    """
+    验证积分
+    规则: 可选，数字，范围0-999999
+    返回: (valid: bool, error: str|None)
+    """
+    if points is None or points == '':
+        return True, None
+    
+    try:
+        p = int(points)
+        if p < 0:
+            return False, '积分值不能小于0'
+        if p > 999999:
+            return False, '积分值不能超过999999'
+    except (ValueError, TypeError):
+        return False, '积分值必须是数字'
+    
+    return True, None
+
+def validate_custom_fields(custom_data, custom_fields_config):
+    """
+    验证自定义字段
+    custom_data: 用户提交的自定义字段数据 {field_id: value}
+    custom_fields_config: 自定义字段配置列表 [{id, label, type, required}, ...]
+    返回: (valid: bool, error: str|None)
+    """
+    if not custom_fields_config:
+        return True, None
+    
+    for field in custom_fields_config:
+        field_id = field.get('id')
+        label = field.get('label', '自定义字段')
+        field_type = field.get('type', 'text')
+        required = field.get('required', False)
+        
+        value = custom_data.get(field_id, '') if custom_data else ''
+        
+        # 必填检查
+        if required and not value:
+            return False, f'{label}为必填项'
+        
+        # 空值跳过后续验证
+        if not value:
+            continue
+        
+        # 类型验证
+        if field_type == 'number':
+            try:
+                float(value)
+            except (ValueError, TypeError):
+                return False, f'{label}必须是有效的数字'
+        elif field_type == 'email':
+            if '@' not in value or '.' not in value:
+                return False, f'{label}格式不正确'
+        elif field_type == 'date':
+            valid, err = validate_birthday(value)  # 复用日期验证
+            if not valid:
+                return False, f'{label}格式不正确'
+    
+    return True, None
+
+# ============================================================================
 # Token 鉴权机制
 # ============================================================================
 # Token格式: user_id:expire_timestamp:signature
@@ -1350,6 +1523,43 @@ def create_member(request):
     if not data.get('name') or not data.get('phone') or not data.get('password'):
         return Response('{"error": "姓名、手机号和密码为必填项"}', 400, {'Content-Type': 'application/json'})
     
+    # 姓名验证
+    valid, err = validate_name(data.get('name'))
+    if not valid:
+        return Response(json.dumps({"error": err}), 400, {'Content-Type': 'application/json'})
+    
+    # 雅号验证
+    valid, err = validate_alias(data.get('alias', ''))
+    if not valid:
+        return Response(json.dumps({"error": err}), 400, {'Content-Type': 'application/json'})
+    
+    # 手机号格式验证
+    valid, err = validate_phone(data.get('phone'))
+    if not valid:
+        return Response(json.dumps({"error": err}), 400, {'Content-Type': 'application/json'})
+    
+    # 密码强度验证
+    valid, err = validate_password_strength(data.get('password'))
+    if not valid:
+        return Response(json.dumps({"error": err}), 400, {'Content-Type': 'application/json'})
+    
+    # 生日验证
+    valid, err = validate_birthday(data.get('birthday', ''))
+    if not valid:
+        return Response(json.dumps({"error": err}), 400, {'Content-Type': 'application/json'})
+    
+    # 积分验证
+    valid, err = validate_points(data.get('points'))
+    if not valid:
+        return Response(json.dumps({"error": err}), 400, {'Content-Type': 'application/json'})
+    
+    # 自定义字段验证
+    settings = get_settings()
+    custom_fields_config = settings.get('custom_member_fields', [])
+    valid, err = validate_custom_fields(data.get('custom'), custom_fields_config)
+    if not valid:
+        return Response(json.dumps({"error": err}), 400, {'Content-Type': 'application/json'})
+    
     # 角色权限验证：不能添加超级管理员或高于自己权限的角色
     target_role = data.get('role', 'member')
     _, operator_role = get_operator_role(request)
@@ -1357,10 +1567,11 @@ def create_member(request):
     if not allowed:
         return Response(json.dumps({"error": role_err}), 400, {'Content-Type': 'application/json'})
     
+    # 手机号唯一性检查
     existing = db_members.get_all()
     for m in existing:
         if m.get('phone') == data.get('phone'):
-            return Response('Phone exists', 400)
+            return Response('{"error": "该手机号已被注册"}', 400, {'Content-Type': 'application/json'})
     
     # 对密码进行哈希处理
     if 'password' in data and data['password']:
@@ -1407,8 +1618,49 @@ def update_member_route(request):
         if not allowed:
             return Response(json.dumps({"error": role_err}), 400, {'Content-Type': 'application/json'})
     
-    # 如果更新密码，先进行哈希处理
+    # 字段验证
+    if 'name' in data:
+        valid, err = validate_name(data.get('name'))
+        if not valid:
+            return Response(json.dumps({"error": err}), 400, {'Content-Type': 'application/json'})
+    
+    if 'alias' in data:
+        valid, err = validate_alias(data.get('alias', ''))
+        if not valid:
+            return Response(json.dumps({"error": err}), 400, {'Content-Type': 'application/json'})
+    
+    if 'phone' in data:
+        valid, err = validate_phone(data.get('phone'))
+        if not valid:
+            return Response(json.dumps({"error": err}), 400, {'Content-Type': 'application/json'})
+        # 手机号唯一性检查（排除自己）
+        for m in db_members.get_all():
+            if m.get('phone') == data.get('phone') and m.get('id') != mid:
+                return Response('{"error": "该手机号已被其他用户使用"}', 400, {'Content-Type': 'application/json'})
+    
+    if 'birthday' in data:
+        valid, err = validate_birthday(data.get('birthday', ''))
+        if not valid:
+            return Response(json.dumps({"error": err}), 400, {'Content-Type': 'application/json'})
+    
+    if 'points' in data:
+        valid, err = validate_points(data.get('points'))
+        if not valid:
+            return Response(json.dumps({"error": err}), 400, {'Content-Type': 'application/json'})
+    
+    # 自定义字段验证
+    if 'custom' in data:
+        settings = get_settings()
+        custom_fields_config = settings.get('custom_member_fields', [])
+        valid, err = validate_custom_fields(data.get('custom'), custom_fields_config)
+        if not valid:
+            return Response(json.dumps({"error": err}), 400, {'Content-Type': 'application/json'})
+    
+    # 如果更新密码，验证强度并哈希处理
     if 'password' in data and data['password']:
+        valid, err = validate_password_strength(data['password'])
+        if not valid:
+            return Response(json.dumps({"error": err}), 400, {'Content-Type': 'application/json'})
         data['password'] = hash_password(data['password'])
     
     # 处理积分字段类型转换
@@ -1459,6 +1711,11 @@ def change_password_route(request):
     
     if not member_id or not old_password or not new_password:
         return Response('{"error": "原密码和新密码为必填项"}', 400, {'Content-Type': 'application/json'})
+    
+    # 新密码强度验证
+    valid, err = validate_password_strength(new_password)
+    if not valid:
+        return Response(json.dumps({"error": err}), 400, {'Content-Type': 'application/json'})
     
     # 获取当前成员
     members = db_members.get_all()
@@ -1619,6 +1876,17 @@ def update_profile(request):
     if not update_data:
         return Response('{"error": "没有可更新的字段"}', 400, {'Content-Type': 'application/json'})
     
+    # 字段验证
+    if 'alias' in update_data:
+        valid, err = validate_alias(update_data.get('alias', ''))
+        if not valid:
+            return Response(json.dumps({"error": err}), 400, {'Content-Type': 'application/json'})
+    
+    if 'birthday' in update_data:
+        valid, err = validate_birthday(update_data.get('birthday', ''))
+        if not valid:
+            return Response(json.dumps({"error": err}), 400, {'Content-Type': 'application/json'})
+    
     # 更新数据库
     def updater(m):
         for k, v in update_data.items():
@@ -1706,7 +1974,13 @@ def settings_fields(request):
         ok, err = check_permission(request, ROLE_DIRECTOR)
         if not ok:
             return err
-        s['custom_member_fields'] = request.json.get('fields', request.json)
+        # 兼容两种格式：{fields: [...]} 或直接数组 [...]
+        data = request.json
+        if isinstance(data, list):
+            fields = data
+        else:
+            fields = data.get('fields', [])
+        s['custom_member_fields'] = fields
         save_settings(s)
         return {"status": "success"}
 

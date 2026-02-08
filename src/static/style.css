@@ -1327,38 +1327,50 @@ button:disabled {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 12px;
-    background: #f8f9fa;
-    border-radius: 6px;
+    padding: 12px 14px;
+    background: var(--bg);
+    border-radius: 8px;
     margin-bottom: 8px;
+    transition: background 0.2s;
+}
+
+.custom-field-item:hover {
+    background: #eef1f4;
 }
 
 .custom-field-info {
     display: flex;
     align-items: center;
     gap: 10px;
+    flex-wrap: wrap;
 }
 
 .custom-field-name {
     font-weight: 500;
-    color: #333;
+    color: var(--text);
 }
 
 .custom-field-type {
     font-size: 0.75em;
     color: #fff;
     background: var(--accent);
-    padding: 2px 8px;
-    border-radius: 10px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-weight: 500;
+}
+
+/* 必填标记样式 */
+.custom-field-type.required {
+    background: linear-gradient(135deg, var(--accent), #006666);
 }
 
 .custom-field-delete {
-    padding: 4px 10px;
+    padding: 6px 12px;
     font-size: 0.8em;
     background: transparent;
-    color: #999;
-    border: 1px solid #ddd;
-    border-radius: 4px;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
     cursor: pointer;
     transition: all 0.2s;
 }
@@ -1369,37 +1381,182 @@ button:disabled {
     border-color: #e74c3c;
 }
 
-.custom-field-add {
+/* 字段操作按钮组 */
+.custom-field-actions {
     display: flex;
     gap: 8px;
-    align-items: center;
-    padding-top: 12px;
-    border-top: 1px solid #eee;
 }
 
-.custom-field-add input,
+.custom-field-edit {
+    padding: 6px 12px;
+    font-size: 0.8em;
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.custom-field-edit:hover {
+    background: var(--accent);
+    color: #fff;
+}
+
+/* 编辑模式样式 */
+.custom-field-item.editing {
+    flex-wrap: wrap;
+    gap: 12px;
+    background: #f8f9fa;
+}
+
+.custom-field-edit-form {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    flex-wrap: wrap;
+}
+
+.custom-field-edit-form input[type="text"] {
+    flex: 1;
+    min-width: 120px;
+    height: 36px;
+    padding: 0 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.9em;
+    margin: 0;
+}
+
+.custom-field-edit-form input[type="text"]:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(0, 128, 128, 0.1);
+    outline: none;
+}
+
+.custom-field-type-readonly {
+    font-size: 0.8em;
+    color: var(--text-muted);
+    background: var(--bg);
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: 1px dashed var(--border);
+}
+
+.custom-field-edit-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.custom-field-save,
+.custom-field-cancel {
+    padding: 6px 14px;
+    font-size: 0.8em;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.custom-field-save {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+}
+
+.custom-field-save:hover {
+    background: #006666;
+}
+
+.custom-field-cancel {
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+}
+
+.custom-field-cancel:hover {
+    background: var(--bg);
+    color: var(--text);
+}
+
+.custom-field-add {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    padding-top: 15px;
+    margin-top: 15px;
+    border-top: 1px solid var(--border);
+    flex-wrap: nowrap;
+}
+
+/* 紧凑表单元素：覆盖全局表单样式的margin和padding */
+.custom-field-add input[type="text"],
 .custom-field-add select,
 .custom-field-add button {
     margin: 0;
-    padding: 0 12px;
-    height: 42px;
+    height: 36px;
     box-sizing: border-box;
-    line-height: 42px;
+    border-radius: 6px;
+    font-size: 0.9em;
+    padding: 0 12px;
 }
 
-.custom-field-add input {
+.custom-field-add input[type="text"] {
     flex: 1;
-    min-width: 0;
+    min-width: 100px;
+}
+
+.custom-field-add input[type="text"]:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(0, 128, 128, 0.1);
+    outline: none;
 }
 
 .custom-field-add select {
-    width: 100px;
+    width: 110px;
     flex-shrink: 0;
+    padding-right: 30px;
 }
 
 .custom-field-add button {
     flex-shrink: 0;
-    padding: 0 18px;
+    padding: 0 16px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+}
+
+.custom-field-add button:hover {
+    background: #006666;
+}
+
+.custom-field-add button:active {
+    transform: scale(0.98);
+}
+
+/* 必填开关布局样式（复用.toggle-switch组件） */
+.required-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    white-space: nowrap;
+    height: 36px;
+}
+
+.required-switch-label {
+    font-size: 0.9em;
+    color: var(--text-muted);
+    transition: color 0.2s;
+    cursor: pointer;
+}
+
+.required-toggle:has(input:checked) .required-switch-label {
+    color: var(--accent);
+    font-weight: 500;
 }
 
 /* ============================================================================
@@ -1530,6 +1687,31 @@ button:disabled {
     .chat-messages-list {
         min-height: 280px;
         max-height: 50vh;
+    }
+    
+    /* 自定义字段添加表单移动端适配 */
+    .custom-field-add {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    .custom-field-add input[type="text"] {
+        flex: 1 1 100%;
+        min-width: unset;
+        order: 1;
+    }
+    .custom-field-add select {
+        flex: 0 0 auto;
+        width: auto;
+        min-width: 110px;
+        order: 2;
+    }
+    .required-toggle {
+        order: 3;
+        flex: 0 0 auto;
+    }
+    .custom-field-add button {
+        flex: 1;
+        order: 4;
     }
 }
 
@@ -1969,4 +2151,42 @@ button:disabled {
 .markdown-content input[type="checkbox"]:checked {
     background: var(--accent);
     border-color: var(--accent);
+}
+
+/* ============================================================================
+   表单验证错误提示样式
+   ============================================================================ */
+
+/* 字段错误状态 */
+.field-error {
+    border: 1px solid #e74c3c !important;
+    background-color: #fff5f5 !important;
+}
+
+/* 错误提示消息 */
+.error-message {
+    color: #e74c3c;
+    font-size: 0.85em;
+    margin-top: 4px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    animation: errorFadeIn 0.2s ease-out;
+}
+
+.error-message::before {
+    content: '⚠';
+    font-size: 1em;
+}
+
+@keyframes errorFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }

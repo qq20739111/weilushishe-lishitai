@@ -22,7 +22,7 @@ class Watchdog:
     # 默认配置
     DEFAULT_TIMEOUT = 300  # 默认超时300秒
     MIN_TIMEOUT = 10       # 最小超时10秒
-    MAX_TIMEOUT = 300      # 最大超时300秒
+    MAX_TIMEOUT = 600      # 最大超时600秒
     
     def __new__(cls):
         """单例模式"""

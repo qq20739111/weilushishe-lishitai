@@ -498,8 +498,16 @@
                         <option value="text">文本</option>
                         <option value="number">数字</option>
                         <option value="date">日期</option>
+                        <option value="email">邮箱</option>
                         <option value="textarea">多行文本</option>
                     </select>
+                    <div class="required-toggle">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="new-field-required">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <span class="required-switch-label">必填</span>
+                    </div>
                     <button onclick="addCustomFieldInput()">添加</button>
                 </div>
             </div>

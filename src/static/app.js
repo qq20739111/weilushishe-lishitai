@@ -25,6 +25,66 @@ let currentUser = null;
 let _customFields = [];
 let _systemSettings = { points_name: '围炉值' };
 
+// ============================================================================
+// 表单验证规则配置
+// ============================================================================
+const VALIDATION_RULES = {
+    name: {
+        required: true,
+        minLength: 1,
+        maxLength: 10,
+        errorMsg: {
+            required: '姓名为必填项',
+            minLength: '姓名不能为空',
+            maxLength: '姓名不能超过10个字符'
+        }
+    },
+    alias: {
+        required: false,
+        maxLength: 10,
+        errorMsg: {
+            maxLength: '雅号不能超过10个字符'
+        }
+    },
+    phone: {
+        required: true,
+        pattern: /^1[3-9]\d{9}$/,
+        errorMsg: {
+            required: '手机号为必填项',
+            pattern: '请输入有效的手机号码（11位，以1开头）'
+        }
+    },
+    password: {
+        required: true,
+        minLength: 6,
+        maxLength: 32,
+        checkStrength: true,
+        errorMsg: {
+            required: '密码为必填项',
+            minLength: '密码长度至少6位',
+            maxLength: '密码长度不能超过32位',
+            strength: '密码需包含至少两种字符类型（数字、小写字母、大写字母、特殊字符）'
+        }
+    },
+    birthday: {
+        required: false,
+        type: 'date',
+        errorMsg: {
+            format: '日期格式不正确'
+        }
+    },
+    points: {
+        required: false,
+        type: 'number',
+        min: 0,
+        max: 999999,
+        errorMsg: {
+            min: '积分值不能小于0',
+            max: '积分值不能超过999999'
+        }
+    }
+};
+
 // Token过期时间（30天）
 const TOKEN_EXPIRE_DAYS = 30;
 
@@ -77,6 +137,240 @@ function withToken(data) {
         return { ...data, token };
     }
     return data;
+}
+
+// ============================================================================
+// 表单验证函数
+// ============================================================================
+
+/**
+ * 检查密码强度（至少包含两种字符类型）
+ * @param {string} password - 密码
+ * @returns {boolean} 是否通过强度检查
+ */
+function checkPasswordStrength(password) {
+    if (!password) return false;
+    let typeCount = 0;
+    if (/[0-9]/.test(password)) typeCount++;      // 数字
+    if (/[a-z]/.test(password)) typeCount++;      // 小写字母
+    if (/[A-Z]/.test(password)) typeCount++;      // 大写字母
+    if (/[^0-9a-zA-Z]/.test(password)) typeCount++; // 特殊字符
+    return typeCount >= 2;
+}
+
+/**
+ * 验证单个字段
+ * @param {string} fieldName - 字段名称
+ * @param {*} value - 字段值
+ * @param {Object} rule - 验证规则
+ * @param {Object} context - 上下文数据（用于跨字段验证）
+ * @returns {Object} { valid: boolean, error: string|null }
+ */
+function validateField(fieldName, value, rule, context = {}) {
+    const isEmpty = value === null || value === undefined || value === '';
+    
+    // 必填检查
+    if (rule.required && isEmpty) {
+        return { valid: false, error: rule.errorMsg?.required || '此项为必填' };
+    }
+    
+    // 空值且非必填，跳过后续验证
+    if (isEmpty) {
+        return { valid: true, error: null };
+    }
+    
+    // 长度验证
+    if (rule.minLength !== undefined && value.length < rule.minLength) {
+        return { valid: false, error: rule.errorMsg?.minLength || `长度至少${rule.minLength}位` };
+    }
+    if (rule.maxLength !== undefined && value.length > rule.maxLength) {
+        return { valid: false, error: rule.errorMsg?.maxLength || `长度不能超过${rule.maxLength}位` };
+    }
+    
+    // 正则模式验证
+    if (rule.pattern && !rule.pattern.test(value)) {
+        return { valid: false, error: rule.errorMsg?.pattern || '格式不正确' };
+    }
+    
+    // 密码强度验证
+    if (rule.checkStrength && !checkPasswordStrength(value)) {
+        return { valid: false, error: rule.errorMsg?.strength || '密码强度不足' };
+    }
+    
+    // 数字范围验证
+    if (rule.type === 'number') {
+        const numValue = Number(value);
+        if (isNaN(numValue)) {
+            return { valid: false, error: '请输入有效的数字' };
+        }
+        if (rule.min !== undefined && numValue < rule.min) {
+            return { valid: false, error: rule.errorMsg?.min || `不能小于${rule.min}` };
+        }
+        if (rule.max !== undefined && numValue > rule.max) {
+            return { valid: false, error: rule.errorMsg?.max || `不能超过${rule.max}` };
+        }
+    }
+    
+    // 日期验证
+    if (rule.type === 'date' && rule.maxDate === 'today') {
+        const inputDate = new Date(value);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        if (inputDate > today) {
+            return { valid: false, error: rule.errorMsg?.maxDate || '日期不能晚于今天' };
+        }
+    }
+    
+    // 密码确认匹配验证
+    if (rule.mustMatch && context[rule.mustMatch] !== value) {
+        return { valid: false, error: rule.errorMsg?.mustMatch || '两次输入不一致' };
+    }
+    
+    return { valid: true, error: null };
+}
+
+/**
+ * 批量验证表单字段
+ * @param {Object} formData - 表单数据对象 { fieldName: value }
+ * @param {Object} rules - 验证规则对象
+ * @returns {Object} { valid: boolean, errors: Object, firstError: string|null }
+ */
+function validateForm(formData, rules) {
+    const errors = {};
+    let firstError = null;
+    
+    for (const [fieldName, rule] of Object.entries(rules)) {
+        const result = validateField(fieldName, formData[fieldName], rule, formData);
+        if (!result.valid) {
+            errors[fieldName] = result.error;
+            if (!firstError) {
+                firstError = result.error;
+            }
+        }
+    }
+    
+    return {
+        valid: Object.keys(errors).length === 0,
+        errors: errors,
+        firstError: firstError
+    };
+}
+
+/**
+ * 验证自定义字段
+ * @param {Array} customFields - 自定义字段配置数组
+ * @param {Object} customData - 自定义字段值对象 { fieldId: value }
+ * @returns {Object} { valid: boolean, errors: Object }
+ */
+function validateCustomFields(customFields, customData) {
+    const errors = {};
+    
+    customFields.forEach(field => {
+        const value = customData[field.id] || '';
+        const isEmpty = value === null || value === undefined || value === '';
+        
+        // 必填验证
+        if (field.required && isEmpty) {
+            errors[field.id] = `${field.label}为必填项`;
+            return;
+        }
+        
+        // 空值且非必填，跳过后续验证
+        if (isEmpty) return;
+        
+        // 类型特定验证
+        switch (field.type) {
+            case 'number':
+                if (isNaN(Number(value))) {
+                    errors[field.id] = `${field.label}必须是有效的数字`;
+                }
+                break;
+            case 'email':
+                const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                if (!emailPattern.test(value)) {
+                    errors[field.id] = '请输入有效的邮箱地址';
+                }
+                break;
+            case 'date':
+                const dateValue = new Date(value);
+                if (isNaN(dateValue.getTime())) {
+                    errors[field.id] = `${field.label}格式不正确`;
+                }
+                break;
+        }
+    });
+    
+    return {
+        valid: Object.keys(errors).length === 0,
+        errors: errors
+    };
+}
+
+/**
+ * 显示字段错误提示
+ * @param {HTMLElement} inputElement - 输入框元素
+ * @param {string} errorMsg - 错误消息
+ */
+function showFieldError(inputElement, errorMsg) {
+    if (!inputElement) return;
+    
+    // 添加错误样式
+    inputElement.classList.add('field-error');
+    
+    // 移除旧的错误提示
+    const existingError = inputElement.parentNode.querySelector('.error-message');
+    if (existingError) {
+        existingError.remove();
+    }
+    
+    // 插入新的错误提示
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'error-message';
+    errorDiv.textContent = errorMsg;
+    inputElement.parentNode.insertBefore(errorDiv, inputElement.nextSibling);
+}
+
+/**
+ * 清除字段错误提示
+ * @param {HTMLElement} inputElement - 输入框元素
+ */
+function clearFieldError(inputElement) {
+    if (!inputElement) return;
+    
+    inputElement.classList.remove('field-error');
+    const errorMsg = inputElement.parentNode.querySelector('.error-message');
+    if (errorMsg) {
+        errorMsg.remove();
+    }
+}
+
+/**
+ * 清除表单所有错误提示
+ * @param {string} formSelector - 表单选择器
+ */
+function clearFormErrors(formSelector) {
+    const form = document.querySelector(formSelector);
+    if (!form) return;
+    
+    form.querySelectorAll('.field-error').forEach(el => {
+        el.classList.remove('field-error');
+    });
+    form.querySelectorAll('.error-message').forEach(el => {
+        el.remove();
+    });
+}
+
+/**
+ * 显示自定义字段错误
+ * @param {Object} errors - 错误对象 { fieldId: errorMsg }
+ */
+function showCustomFieldErrors(errors) {
+    Object.entries(errors).forEach(([fieldId, errorMsg]) => {
+        const input = document.querySelector(`.custom-field-input[data-id="${fieldId}"]`);
+        if (input) {
+            showFieldError(input, errorMsg);
+        }
+    });
 }
 
 // --- 移动端菜单控制 ---
@@ -525,6 +819,32 @@ async function saveProfile() {
         return;
     }
     
+    // 清除之前的错误提示
+    clearFormErrors('#modal-profile');
+    
+    // 验证字段
+    let hasError = false;
+    
+    // 雅号验证
+    const aliasResult = validateField('alias', alias, VALIDATION_RULES.alias);
+    if (!aliasResult.valid) {
+        showFieldError(document.getElementById('profile-alias'), aliasResult.error);
+        hasError = true;
+    }
+    
+    // 生日验证
+    if (birthday) {
+        const birthdayResult = validateField('birthday', birthday, VALIDATION_RULES.birthday);
+        if (!birthdayResult.valid) {
+            showFieldError(document.getElementById('profile-birthday'), birthdayResult.error);
+            hasError = true;
+        }
+    }
+    
+    if (hasError) {
+        return;
+    }
+    
     // 获取保存按钮并禁用，防止重复提交
     const btn = document.querySelector('#modal-profile button[onclick*="saveProfile"]');
     const oldText = btn ? btn.innerText : '';
@@ -581,18 +901,40 @@ async function submitProfilePassword() {
     const newPwd = document.getElementById('profile-new-password').value;
     const confirmPwd = document.getElementById('profile-confirm-password').value;
     
-    if (!oldPwd || !newPwd || !confirmPwd) {
-        alert('请填写所有密码字段');
-        return;
+    // 清除之前的错误提示（只清除密码相关字段）
+    clearFieldError(document.getElementById('profile-old-password'));
+    clearFieldError(document.getElementById('profile-new-password'));
+    clearFieldError(document.getElementById('profile-confirm-password'));
+    
+    // 验证字段
+    let hasError = false;
+    
+    if (!oldPwd) {
+        showFieldError(document.getElementById('profile-old-password'), '请输入原密码');
+        hasError = true;
     }
     
-    if (newPwd !== confirmPwd) {
-        alert('两次输入的新密码不一致');
-        return;
+    if (!newPwd) {
+        showFieldError(document.getElementById('profile-new-password'), '请输入新密码');
+        hasError = true;
+    } else {
+        // 新密码验证（长度+强度）
+        const pwdResult = validateField('password', newPwd, VALIDATION_RULES.password);
+        if (!pwdResult.valid) {
+            showFieldError(document.getElementById('profile-new-password'), pwdResult.error);
+            hasError = true;
+        }
     }
     
-    if (newPwd.length < 4) {
-        alert('新密码长度至少4位');
+    if (!confirmPwd) {
+        showFieldError(document.getElementById('profile-confirm-password'), '请确认新密码');
+        hasError = true;
+    } else if (newPwd && newPwd !== confirmPwd) {
+        showFieldError(document.getElementById('profile-confirm-password'), '两次输入的新密码不一致');
+        hasError = true;
+    }
+    
+    if (hasError) {
         return;
     }
     
@@ -1474,12 +1816,13 @@ async function openMemberModal(member = null) {
     if (customContainer) {
         customContainer.innerHTML = _customFields.map(f => {
             const val = (member && member.custom && member.custom[f.id]) ? member.custom[f.id] : '';
+            const requiredMark = f.required ? ' *' : '';
             if (f.type === 'textarea') {
-                return `<textarea class="custom-field-input" data-id="${f.id}" placeholder="${f.label}" rows="2" style="width:100%; box-sizing:border-box; margin-bottom:8px;">${val}</textarea>`;
+                return `<textarea class="custom-field-input" data-id="${f.id}" placeholder="${f.label}${requiredMark}" rows="2" style="width:100%; box-sizing:border-box; margin-bottom:8px;">${val}</textarea>`;
             } else if (f.type === 'date') {
-                return `<div style="margin-bottom:8px;"><label class="date-label">${f.label}</label><input type="date" class="custom-field-input" data-id="${f.id}" value="${val}" style="width:100%; box-sizing:border-box;"></div>`;
+                return `<div style="margin-bottom:8px;"><label class="date-label">${f.label}${requiredMark}</label><input type="date" class="custom-field-input" data-id="${f.id}" value="${val}" style="width:100%; box-sizing:border-box;"></div>`;
             } else {
-                return `<input type="${f.type || 'text'}" class="custom-field-input" data-id="${f.id}" placeholder="${f.label}" value="${val}" style="width:100%; box-sizing:border-box; margin-bottom:8px;">`;
+                return `<input type="${f.type || 'text'}" class="custom-field-input" data-id="${f.id}" placeholder="${f.label}${requiredMark}" value="${val}" style="width:100%; box-sizing:border-box; margin-bottom:8px;">`;
             }
         }).join('');
     }
@@ -1494,14 +1837,61 @@ async function submitMember() {
     submitBtn.disabled = true;
 
     try {
+        // 清除之前的错误提示
+        clearFormErrors('#modal-member');
+        
         const data = {
-            name: document.getElementById('m-name').value,
-            alias: document.getElementById('m-alias').value,
-            phone: document.getElementById('m-phone').value,
+            name: document.getElementById('m-name').value.trim(),
+            alias: document.getElementById('m-alias').value.trim(),
+            phone: document.getElementById('m-phone').value.trim(),
             role: document.getElementById('m-role').value,
             points: parseInt(document.getElementById('m-points').value || 0),
             birthday: document.getElementById('m-birthday').value
         };
+        
+        // 基础字段验证
+        let hasError = false;
+        
+        // 姓名验证
+        const nameResult = validateField('name', data.name, VALIDATION_RULES.name);
+        if (!nameResult.valid) {
+            showFieldError(document.getElementById('m-name'), nameResult.error);
+            hasError = true;
+        }
+        
+        // 雅号验证
+        const aliasResult = validateField('alias', data.alias, VALIDATION_RULES.alias);
+        if (!aliasResult.valid) {
+            showFieldError(document.getElementById('m-alias'), aliasResult.error);
+            hasError = true;
+        }
+        
+        // 手机号验证
+        const phoneResult = validateField('phone', data.phone, VALIDATION_RULES.phone);
+        if (!phoneResult.valid) {
+            showFieldError(document.getElementById('m-phone'), phoneResult.error);
+            hasError = true;
+        }
+        
+        // 积分验证
+        const pointsResult = validateField('points', data.points, VALIDATION_RULES.points);
+        if (!pointsResult.valid) {
+            showFieldError(document.getElementById('m-points'), pointsResult.error);
+            hasError = true;
+        }
+        
+        // 生日验证
+        if (data.birthday) {
+            const birthdayResult = validateField('birthday', data.birthday, VALIDATION_RULES.birthday);
+            if (!birthdayResult.valid) {
+                showFieldError(document.getElementById('m-birthday'), birthdayResult.error);
+                hasError = true;
+            }
+        }
+        
+        if (hasError) {
+            return;
+        }
         
         // 前端角色权限验证：只在新增或角色变更时验证
         // 编辑时如果角色没变，不需要验证（允许超管编辑自己的其他资料）
@@ -1514,22 +1904,35 @@ async function submitMember() {
             }
         }
         
-        // Collect Custom Fields
+        // 收集自定义字段
         const customData = {};
         document.querySelectorAll('.custom-field-input').forEach(input => {
             customData[input.dataset.id] = input.value;
         });
         data.custom = customData;
+        
+        // 验证自定义字段
+        const customValidation = validateCustomFields(_customFields, customData);
+        if (!customValidation.valid) {
+            showCustomFieldErrors(customValidation.errors);
+            return;
+        }
 
         const pwd = document.getElementById('m-password').value;
         if (pwd) data.password = pwd;
 
         if(!editingMemberId) {
-             // Creating new
-             if(!data.name || !data.phone || !data.password) {
-                alert('姓名、手机号和初始密码必填');
+            // 新建成员：验证密码
+            if (!pwd) {
+                showFieldError(document.getElementById('m-password'), '密码为必填项');
                 return;
             }
+            const pwdResult = validateField('password', pwd, VALIDATION_RULES.password);
+            if (!pwdResult.valid) {
+                showFieldError(document.getElementById('m-password'), pwdResult.error);
+                return;
+            }
+            
             data.joined_at = new Date().toISOString().split('T')[0];
             
             const response = await fetch(`${API_BASE}/members`, {
@@ -1542,7 +1945,15 @@ async function submitMember() {
                 throw new Error(err.error || '添加失败');
             }
         } else {
-            // Updating
+            // 编辑成员：如果填写了密码，验证密码强度
+            if (pwd) {
+                const pwdResult = validateField('password', pwd, VALIDATION_RULES.password);
+                if (!pwdResult.valid) {
+                    showFieldError(document.getElementById('m-password'), pwdResult.error);
+                    return;
+                }
+            }
+            
             data.id = editingMemberId;
             const response = await fetch(`${API_BASE}/members/update`, {
                 method: 'POST',
@@ -2973,7 +3384,7 @@ window.onload = function() {
 
 async function fetchCustomFields() {
     try {
-        const res = await fetch(`${API_BASE}/settings/fields`);
+        const res = await fetchWithAuth(`${API_BASE}/settings/fields`);
         if(res.ok) _customFields = await res.json();
     } catch(e) { console.error('Failed to load custom fields', e); }
 }
@@ -3217,19 +3628,22 @@ function getPointsName() {
 async function addCustomFieldInput() {
     const input = document.getElementById('new-field-label');
     const typeSelect = document.getElementById('new-field-type');
+    const requiredCheckbox = document.getElementById('new-field-required');
     const label = input.value.trim();
     const type = typeSelect ? typeSelect.value : 'text';
+    const required = requiredCheckbox ? requiredCheckbox.checked : false;
 
     if(!label) return;
     
     // Check dupe
     if(_customFields.find(f => f.label === label)) return alert('字段名已存在');
     
-    const newField = { id: 'cf_' + Date.now(), label: label, type: type };
+    const newField = { id: 'cf_' + Date.now(), label: label, type: type, required: required };
     const newFields = [..._customFields, newField];
     
     await saveCustomFields(newFields);
     input.value = '';
+    if (requiredCheckbox) requiredCheckbox.checked = false;
 }
 
 async function deleteCustomField(id) {
@@ -3247,7 +3661,7 @@ async function saveCustomFields(fields) {
          });
          if(res.ok) {
              _customFields = fields;
-             renderAdminSettings(); 
+             renderCustomFieldsList(); 
              alert('设置已保存');
          } else {
              const err = await res.json().catch(() => ({}));
@@ -3257,9 +3671,6 @@ async function saveCustomFields(fields) {
 }
 
 function renderAdminSettings() {
-    const container = document.getElementById('settings-fields-list');
-    if(!container) return;
-    
     // 加载系统设置UI
     loadSystemSettingsUI();
     
@@ -3271,26 +3682,115 @@ function renderAdminSettings() {
     
     // 加载站点功能设置
     loadSiteSettings();
-    
-    // 加载登录日志（必须在 return 之前调用）
+
+    // 加载自定义字段列表
+    renderCustomFieldsList();
+
+    // 加载登录日志
     fetchLoginLogs();
+}
+
+// 渲染自定义字段列表
+function renderCustomFieldsList() {
+    const container = document.getElementById('settings-fields-list');
+    if(!container) return;
     
     if(_customFields.length === 0) {
         container.innerHTML = '<div class="empty-hint">暂无自定义字段</div>';
         return;
     }
 
-    const typeMap = { text: '文本', number: '数字', date: '日期', textarea: '多行文本' };
+    const typeMap = { text: '文本', number: '数字', date: '日期', email: '邮箱', textarea: '多行文本' };
 
-    container.innerHTML = _customFields.map(f => `
-        <div class="custom-field-item">
+    container.innerHTML = _customFields.map(f => {
+        const typeText = typeMap[f.type] || '文本';
+        const requiredClass = f.required ? ' required' : '';
+        const requiredText = f.required ? ' · 必填' : '';
+        return `
+        <div class="custom-field-item" data-field-id="${f.id}">
             <div class="custom-field-info">
                 <span class="custom-field-name">${f.label}</span>
-                <span class="custom-field-type">${typeMap[f.type] || '文本'}</span>
+                <span class="custom-field-type${requiredClass}">${typeText}${requiredText}</span>
             </div>
-            <button onclick="deleteCustomField('${f.id}')" class="custom-field-delete">删除</button>
+            <div class="custom-field-actions">
+                <button onclick="editCustomField('${f.id}')" class="custom-field-edit">编辑</button>
+                <button onclick="deleteCustomField('${f.id}')" class="custom-field-delete">删除</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+// 编辑自定义字段
+function editCustomField(fieldId) {
+    const field = _customFields.find(f => f.id === fieldId);
+    if(!field) return;
+    
+    const item = document.querySelector(`.custom-field-item[data-field-id="${fieldId}"]`);
+    if(!item) return;
+    
+    const typeMap = { text: '文本', number: '数字', date: '日期', email: '邮箱', textarea: '多行文本' };
+    const typeText = typeMap[field.type] || '文本';
+    const checkedAttr = field.required ? 'checked' : '';
+    
+    item.classList.add('editing');
+    item.innerHTML = `
+        <div class="custom-field-edit-form">
+            <input type="text" class="edit-field-name" value="${field.label}" maxlength="20" placeholder="字段名称">
+            <span class="custom-field-type-readonly">${typeText}</span>
+            <label class="required-toggle">
+                <div class="toggle-switch">
+                    <input type="checkbox" class="edit-field-required" ${checkedAttr}>
+                    <span class="toggle-slider"></span>
+                </div>
+                <span class="required-switch-label">必填</span>
+            </label>
         </div>
-    `).join('');
+        <div class="custom-field-edit-actions">
+            <button onclick="saveCustomFieldEdit('${fieldId}')" class="custom-field-save">保存</button>
+            <button onclick="cancelCustomFieldEdit()" class="custom-field-cancel">取消</button>
+        </div>`;
+}
+
+// 保存自定义字段编辑
+async function saveCustomFieldEdit(fieldId) {
+    const item = document.querySelector(`.custom-field-item[data-field-id="${fieldId}"]`);
+    if(!item) return;
+    
+    const nameInput = item.querySelector('.edit-field-name');
+    const requiredInput = item.querySelector('.edit-field-required');
+    
+    const newLabel = nameInput.value.trim();
+    if(!newLabel) {
+        alert('字段名称不能为空');
+        nameInput.focus();
+        return;
+    }
+    
+    // 更新本地数据
+    const fieldIndex = _customFields.findIndex(f => f.id === fieldId);
+    if(fieldIndex === -1) return;
+    
+    _customFields[fieldIndex].label = newLabel;
+    _customFields[fieldIndex].required = requiredInput.checked;
+    
+    // 保存到服务器
+    try {
+        const res = await fetchWithAuth(`${API_BASE}/settings/fields`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields: _customFields })
+        });
+        if(!res.ok) throw new Error('保存失败');
+        renderCustomFieldsList();
+    } catch(e) {
+        console.error(e);
+        alert('保存失败，请重试');
+    }
+}
+
+// 取消自定义字段编辑
+function cancelCustomFieldEdit() {
+    renderCustomFieldsList();
 }
 
 // --- 数据统计 ---
