@@ -927,7 +927,7 @@ def record_points_change(member_id, member_name, change, reason):
     }
     db_points_logs.append(log)
 
-def record_login_log(member_id, member_name, phone, status):
+def record_login_log(member_id, member_name, phone, status, ip=''):
     """记录登录日志"""
     log = {
         'id': db_login_logs.get_max_id() + 1,
@@ -935,7 +935,8 @@ def record_login_log(member_id, member_name, phone, status):
         'member_name': member_name,
         'phone': phone[:3] + '****' + phone[-4:] if len(phone) >= 7 else phone,
         'login_time': get_current_time(),
-        'status': status
+        'status': status,
+        'ip': ip
     }
     db_login_logs.append(log)
     
@@ -1845,7 +1846,7 @@ def login_route(request):
                         if s.get('maintenance_mode', False):
                             role = m.get('role', 'member')
                             if role not in ['super_admin', 'admin']:
-                                record_login_log(m.get('id'), m.get('name', '未知'), p, 'failed')
+                                record_login_log(m.get('id'), m.get('name', '未知'), p, 'failed', request.client_ip)
                                 return Response('{"error": "系统维护中，仅管理员可登录"}', 503, {'Content-Type': 'application/json'})
                         
                         m_safe = m.copy()
@@ -1855,7 +1856,7 @@ def login_route(request):
                         m_safe['token'] = token
                         m_safe['expires_in'] = expires_in  # 有效期秒数，前端自行计算过期时间
                         # 记录登录成功日志
-                        record_login_log(m.get('id'), m.get('name', '未知'), p, 'success')
+                        record_login_log(m.get('id'), m.get('name', '未知'), p, 'success', request.client_ip)
                         return m_safe
                 except Exception as e:
                     debug(f"解析用户记录失败: {e}", "Login")
@@ -1863,7 +1864,7 @@ def login_route(request):
         debug(f"读取用户文件失败: {e}", "Login")
     
     # 记录登录失败日志
-    record_login_log(None, '未知', p or '', 'failed')
+    record_login_log(None, '未知', p or '', 'failed', request.client_ip)
     return Response('Invalid credentials', 401)
 
 @api_route('/api/profile/update', methods=['POST'])

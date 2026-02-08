@@ -3912,18 +3912,23 @@ async function fetchLoginLogs() {
             return;
         }
         
-        container.innerHTML = logs.map(log => `
-            <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #eee;">
-                <div>
-                    <span style="font-weight:500;">${log.member_name || '未知'}</span>
-                    <span style="color:#888; font-size:0.85em; margin-left:8px;">${log.phone}</span>
-                </div>
-                <div style="text-align:right;">
-                    <span class="points-badge" style="${log.status === 'success' ? 'background:#E8F5E9; color:#2E7D32;' : 'background:#FFEBEE; color:#C62828;'}">${log.status === 'success' ? '成功' : '失败'}</span>
-                    <div style="font-size:0.8em; color:#999; margin-top:4px;">${log.login_time ? log.login_time.replace('T', ' ') : ''}</div>
-                </div>
-            </div>
-        `).join('');
+        const header = `<div class="login-log-header">
+            <div>用户</div><div>手机号</div><div>IP地址</div><div>状态</div><div>时间</div>
+        </div>`;
+        const rows = logs.map(log => {
+            const statusCls = log.status === 'success' ? 'log-status-success' : 'log-status-failed';
+            const statusTxt = log.status === 'success' ? '成功' : '失败';
+            const ip = log.ip || '-';
+            const time = log.login_time ? log.login_time.replace('T', ' ') : '';
+            return `<div class="login-log-row">
+                <div data-label="用户">${log.member_name || '未知'}</div>
+                <div data-label="手机号">${log.phone}</div>
+                <div data-label="IP">${ip}</div>
+                <div data-label="状态"><span class="points-badge ${statusCls}">${statusTxt}</span></div>
+                <div data-label="时间">${time}</div>
+            </div>`;
+        }).join('');
+        container.innerHTML = `<div class="login-log-table">${header}${rows}</div>`;
     } catch(e) {
         console.error(e);
         container.innerHTML = '<div class="empty-hint">加载失败，请刷新重试</div>';

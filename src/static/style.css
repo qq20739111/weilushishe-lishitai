@@ -511,6 +511,119 @@ button:disabled {
     font-weight: 600;
     display: inline-block;
 }
+
+/* 登录日志容器 */
+.login-logs-container {
+    max-height: 400px;
+    overflow-y: auto;
+}
+.login-log-table {
+    width: 100%;
+}
+.login-log-header {
+    display: grid;
+    grid-template-columns: 1fr 1.2fr 1.3fr 0.7fr 1.8fr;
+    gap: 8px;
+    padding: 8px 16px;
+    background: var(--bg);
+    border-radius: var(--radius) var(--radius) 0 0;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    border-bottom: 2px solid var(--border);
+}
+.login-log-row {
+    display: grid;
+    grid-template-columns: 1fr 1.2fr 1.3fr 0.7fr 1.8fr;
+    gap: 8px;
+    padding: 10px 16px;
+    border-bottom: 1px solid #f0f0f0;
+    align-items: center;
+    font-size: 0.85rem;
+    transition: background 0.15s;
+}
+.login-log-row:last-child {
+    border-bottom: none;
+}
+.login-log-row:hover {
+    background: #f8fafa;
+}
+.login-log-row > div:first-child {
+    font-weight: 500;
+}
+.login-log-row > div:nth-child(2) {
+    color: var(--text-muted);
+    font-size: 0.82rem;
+}
+.login-log-row > div:nth-child(3) {
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    font-size: 0.78rem;
+    color: var(--accent);
+}
+.login-log-row > div:nth-child(5) {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    text-align: left;
+}
+.log-status-success {
+    background: #E8F5E9 !important;
+    color: #2E7D32 !important;
+}
+.log-status-failed {
+    background: #FFEBEE !important;
+    color: #C62828 !important;
+}
+
+/* 登录日志移动端适配 */
+@media (max-width: 767px) {
+    .login-log-header {
+        display: none;
+    }
+    .login-log-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 12px;
+        padding: 10px;
+        margin-bottom: 6px;
+        background: var(--card-bg);
+        border-radius: 8px;
+        border: 1px solid #f0f0f0;
+        border-bottom: 1px solid #f0f0f0;
+    }
+    .login-log-row:hover {
+        background: var(--card-bg);
+    }
+    .login-log-row > div {
+        font-size: 0.82rem;
+    }
+    .login-log-row > div::before {
+        content: attr(data-label) "：";
+        color: var(--text-muted);
+        font-size: 0.75rem;
+        margin-right: 2px;
+    }
+    .login-log-row > div:first-child {
+        width: 100%;
+        font-size: 0.9rem;
+    }
+    .login-log-row > div:first-child::before {
+        display: none;
+    }
+    .login-log-row > div:nth-child(4) {
+        margin-left: auto;
+        order: -1;
+        position: relative;
+        top: 0;
+    }
+    .login-log-row > div:nth-child(4)::before {
+        display: none;
+    }
+    .login-log-row > div:nth-child(5) {
+        width: 100%;
+        text-align: left;
+        font-size: 0.75rem;
+    }
+}
 .member-actions {
     display: flex;
     gap: 8px;

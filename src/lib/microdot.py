@@ -5,6 +5,7 @@ import io
 class Request:
     def __init__(self, reader):
         self.reader = reader
+        self.client_ip = ''
         self.method = 'GET'
         self.path = '/'
         self.headers = {}
@@ -138,6 +139,13 @@ class Microdot:
     async def handle_request(self, reader, writer):
         import gc
         req = Request(reader)
+        # 提取客户端IP
+        try:
+            peer = writer.get_extra_info('peername')
+            if peer:
+                req.client_ip = peer[0]
+        except:
+            pass
         if not await req.read_request():
             writer.close()
             await writer.wait_closed()
