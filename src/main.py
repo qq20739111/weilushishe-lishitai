@@ -21,6 +21,10 @@ except ImportError as e:
 # 记录系统启动时间（用于计算uptime）
 _system_start_time = time.time()
 
+# 运行时Token签名密钥（每次启动随机生成128位，与密码盐值完全独立）
+_RUNTIME_TOKEN_SECRET = ubinascii.hexlify(os.urandom(16)).decode('utf-8')
+info("Token签名密钥已生成（128位随机）", "Security")
+
 # 看门狗定时喂狗器（防止空闲超时）
 _watchdog_timer = None
 
@@ -311,6 +315,7 @@ def validate_custom_fields(custom_data, custom_fields_config):
 # ============================================================================
 # Token格式: user_id:expire_timestamp:signature
 # signature = sha256(user_id:expire_timestamp:secret_key)[:32]
+# 签名密钥: 每次启动随机生成128位，与密码盐值(password_salt)完全独立
 # 默认过期时间: 30天
 
 DEFAULT_TOKEN_EXPIRE_DAYS = 30  # 默认30天
@@ -322,9 +327,8 @@ def _get_token_expire_seconds():
     return int(days) * 24 * 3600
 
 def _get_token_secret():
-    """获取Token签名密钥（使用password_salt作为基础）"""
-    settings = get_settings()
-    return settings.get('password_salt', 'weilu2018') + '_token_key'
+    """获取Token签名密钥（运行时随机生成，与密码盐值独立，重启后失效）"""
+    return _RUNTIME_TOKEN_SECRET
 
 def generate_token(user_id):
     """
@@ -1809,6 +1813,14 @@ def yearly_points_ranking(request):
     
     # 返回前10名
     return ranking[:10]
+
+@api_route('/api/check-token', methods=['GET'])
+def check_token_route(request):
+    """轻量Token验证接口，用于前端检测Token是否仍然有效"""
+    valid, user_id, err_resp = check_token(request)
+    if not valid:
+        return err_resp
+    return {"valid": True, "user_id": user_id}
 
 @api_route('/api/login', methods=['POST'])
 def login_route(request):

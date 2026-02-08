@@ -584,6 +584,19 @@ async function checkLogin() {
             // Token已过期，清除登录状态
             localStorage.removeItem('user');
             currentUser = null;
+        } else {
+            // Token本地未过期，向服务器验证Token是否仍然有效（服务器重启会使Token失效）
+            try {
+                const token = currentUser.token;
+                const res = await fetch(`${API_BASE}/check-token?token=${token}`);
+                if (res.status === 401) {
+                    // 静默清除失效的登录状态，页面会自动显示登录界面
+                    localStorage.removeItem('user');
+                    currentUser = null;
+                }
+            } catch (e) {
+                // 网络异常时保留本地登录状态，不阻塞页面加载
+            }
         }
     } else {
         currentUser = null;
@@ -815,12 +828,9 @@ async function fetchWithAuth(url, options = {}) {
     
     const response = await fetch(url, options);
     
-    // 如果返回401，可能是Token过期
+    // 如果返回401，Token已失效（可能是服务器重启或Token过期）
     if (response.status === 401 && currentUser) {
-        const data = await response.clone().json().catch(() => ({}));
-        if (data.error && data.error.includes('过期')) {
-            handleTokenExpired();
-        }
+        handleTokenExpired();
     }
     
     return response;

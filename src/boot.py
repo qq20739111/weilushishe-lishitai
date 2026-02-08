@@ -2,6 +2,7 @@ import machine
 import network
 import time
 import json
+import ntptime
 from lib.WifiConnector import WifiConnector
 from lib.SystemStatus import status_led
 from lib.Logger import log, debug, info, warn, error
@@ -24,6 +25,34 @@ def load_config():
     except Exception as e:
         error(f"配置加载失败: {e}", "Boot")
         return None
+
+NTP_MAX_RETRIES = 3  # NTP同步最大重试次数
+
+def sync_ntp_time():
+    """
+    同步NTP网络时间并校准为北京时间(UTC+8)
+    失败不阻塞启动流程
+    """
+    ntptime.host = 'ntp.aliyun.com'
+    for attempt in range(NTP_MAX_RETRIES):
+        try:
+            ntptime.settime()  # 设置RTC为UTC时间
+            # 校准为北京时间 (UTC+8)
+            utc_secs = time.time()
+            cst_secs = utc_secs + 8 * 3600
+            tm = time.localtime(cst_secs)
+            # RTC datetime格式: (年, 月, 日, 星期, 时, 分, 秒, 亚秒)
+            machine.RTC().datetime((tm[0], tm[1], tm[2], tm[6], tm[3], tm[4], tm[5], 0))
+            t = time.localtime()
+            info(f"NTP时间同步成功: {t[0]:04d}-{t[1]:02d}-{t[2]:02d} {t[3]:02d}:{t[4]:02d}:{t[5]:02d}", "NTP")
+            return True
+        except Exception as e:
+            if attempt < NTP_MAX_RETRIES - 1:
+                debug(f"NTP同步失败({attempt+1}/{NTP_MAX_RETRIES}): {e}，重试中...", "NTP")
+                time.sleep(1)
+            else:
+                warn(f"NTP时间同步失败，系统时间可能不准确: {e}", "NTP")
+    return False
 
 def connect_wifi():
     # Indicate connecting status
@@ -61,6 +90,9 @@ def connect_wifi():
         if wifi.connect(ssid, password):
             info(f"WiFi已连接! IP: {wifi.get_ip_address()}", "WiFi")
             connected = True
+            
+            # 同步NTP网络时间
+            sync_ntp_time()
             
             # 配置静态IP（如果启用）
             if config.get('sta_use_static_ip') and config.get('sta_ip'):
