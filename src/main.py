@@ -742,6 +742,13 @@ ROLE_ADMIN = ['super_admin', 'admin']  # 管理员级别：超管、管理员
 ROLE_DIRECTOR = ['super_admin', 'admin', 'director']  # 理事级别：超管、管理员、理事
 ROLE_FINANCE = ['super_admin', 'admin', 'finance']  # 财务级别：超管、管理员、财务
 
+# 系统设置字段列表（get_settings / save_settings / backup 共用）
+SETTINGS_KEYS = [
+    'custom_member_fields', 'password_salt', 'points_name', 'system_name',
+    'token_expire_days', 'maintenance_mode', 'allow_guest',
+    'chat_enabled', 'chat_guest_max', 'chat_max_users', 'chat_cache_size'
+]
+
 # 角色权限层级（数字越小权限越高）
 ROLE_LEVEL = {
     'super_admin': 0,
@@ -998,8 +1005,7 @@ def save_settings(data):
             config = json.load(f)
         
         # 更新系统设置部分
-        for key in ['custom_member_fields', 'password_salt', 'points_name', 'system_name', 'token_expire_days',
-                    'maintenance_mode', 'allow_guest', 'chat_enabled', 'chat_guest_max', 'chat_max_users', 'chat_cache_size']:
+        for key in SETTINGS_KEYS:
             if key in data:
                 config[key] = data[key]
         
@@ -2448,7 +2454,7 @@ def backup_import_table(request):
             with open('data/config.json', 'r') as f:
                 config = json.load(f)
             # 合并设置数据
-            for key in ['custom_member_fields', 'password_salt', 'points_name', 'system_name']:
+            for key in SETTINGS_KEYS:
                 if key in table_data:
                     config[key] = table_data[key]
             with open('data/config.json', 'w') as f:
