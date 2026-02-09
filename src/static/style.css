@@ -754,6 +754,15 @@ button:disabled {
     font-size: 0.9rem;
 }
 
+/* 诗词详情视图元信息卡片 */
+.poem-detail-meta {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    font-size: 0.95rem;
+}
+
 /* Modal */
 .modal { 
     display: flex; 
@@ -776,6 +785,7 @@ button:disabled {
     background: white; 
     margin: 40px auto; 
     padding: 30px; 
+    padding-top: 50px;
     width: 90%; 
     max-width: 500px; 
     max-height: calc(100vh - 80px);
@@ -1051,6 +1061,11 @@ button:disabled {
     .poem-meta {
         flex-wrap: wrap;
         gap: 10px;
+    }
+
+    /* 诗词详情模态框移动端适配 */
+    #modal-poem-view .modal-content {
+        max-width: 95% !important;
     }
     .poem-meta > div:last-child {
         display: flex;
@@ -2575,4 +2590,16 @@ button:disabled {
     .heatmap-grid {
         grid-template-columns: repeat(52, minmax(8px, 1fr));
     }
+}
+
+/* 页脚版权信息 */
+.site-footer {
+    text-align: center;
+    padding: 20px 0;
+    margin-top: 20px;
+    color: var(--text-muted, #999);
+    font-size: 0.85rem;
+}
+.site-footer p {
+    margin: 0;
 }

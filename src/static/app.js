@@ -690,7 +690,13 @@ async function checkSystemSettings() {
     try {
         const res = await fetch(`${API_BASE}/settings/system`);
         if (res.ok) {
-            return await res.json();
+            const data = await res.json();
+            // 更新网页标题和页脚站名
+            const name = data.system_name || '围炉诗社·理事台';
+            document.title = name;
+            const footerName = document.getElementById('footer-site-name');
+            if (footerName) footerName.textContent = name;
+            return data;
         }
     } catch(e) {
         console.error('检查系统设置失败:', e);
@@ -1370,6 +1376,64 @@ function openPoemModal(poem = null) {
         `;
     }
     toggleModal('modal-poem');
+}
+
+function openPoemDetailView(poem) {
+    if (!poem) return;
+
+    // 标题
+    document.getElementById('view-poem-title').innerText = poem.title || '';
+
+    // 类型徽章
+    const typeEl = document.getElementById('view-poem-type');
+    typeEl.innerText = poem.type || '';
+    typeEl.setAttribute('style', getPoemTypeStyle(poem.type) + 'padding:2px 8px; border-radius:4px; font-size:0.85em; flex-shrink:0;');
+
+    // 元信息卡片 + 正文
+    const displayDate = poem.date ? poem.date.replace('T', ' ') : '';
+    const draftBadge = poem.isLocal
+        ? '<span style="background:#FFA000; color:white; padding:2px 6px; border-radius:4px; font-size:0.8em; margin-left:8px;">草稿 (本地)</span>'
+        : '';
+
+    const container = document.getElementById('view-poem-container');
+    container.innerHTML = `
+        <div class="poem-detail-meta">
+            <div style="margin-bottom:8px; display:flex;">
+                <span style="color:#666; width:80px; flex-shrink:0;">作者</span>
+                <span>${escapeHtml(getSmartDisplayName(poem.author_id, poem.author) || '佚名')}${draftBadge}</span>
+            </div>
+            <div style="display:flex;">
+                <span style="color:#666; width:80px; flex-shrink:0;">发布时间</span>
+                <span>${escapeHtml(displayDate) || '未知'}</span>
+            </div>
+        </div>
+        <div class="poem-body markdown-content">${renderMarkdown(poem.content || '')}</div>
+    `;
+
+    // 权限判定
+    const isAuthor = currentUser && (poem.author_id === currentUser.id || poem.author === currentUser.name || poem.author === currentUser.alias);
+    const isPoemAdmin = currentUser && ['super_admin', 'admin'].includes(currentUser.role);
+    const canManage = isPoemAdmin || poem.isLocal || isAuthor;
+
+    const actionsEl = document.getElementById('view-poem-actions');
+    if (canManage) {
+        const idParam = typeof poem.id === 'string' ? `'${poem.id}'` : poem.id;
+        const btnLabel = poem.isLocal ? '编辑草稿' : '修订';
+        actionsEl.innerHTML = `<button onclick="editPoemFromView(${idParam})" style="background:#4CAF50; padding:6px 14px; font-size:0.9em;">${btnLabel}</button>`;
+    } else {
+        actionsEl.innerHTML = '';
+    }
+
+    toggleModal('modal-poem-view');
+}
+
+function editPoemFromView(poemId) {
+    toggleModal('modal-poem-view');
+    let poem = _cachedPoems.find(p => p.id == poemId);
+    if (!poem && _searchCache.poems) {
+        poem = _searchCache.poems.find(p => p.id == poemId);
+    }
+    if (poem) openPoemModal(poem);
 }
 
 async function saveDraft() {
@@ -3271,7 +3335,7 @@ function renderWeeklyHeatmap(data) {
         let cls, tip;
         if (isAct) {
             cls = 'activity';
-            tip = '第' + (i + 1) + '周: ' + count + '篇诗词 【活动周】';
+            tip = '第' + (i + 1) + '周: ' + count + '篇诗文 【活动周】';
         } else {
             let lvl = 0;
             if (count >= 11) lvl = 4;
@@ -3279,7 +3343,7 @@ function renderWeeklyHeatmap(data) {
             else if (count >= 3) lvl = 2;
             else if (count >= 1) lvl = 1;
             cls = 'level-' + lvl;
-            tip = '第' + (i + 1) + '周: ' + count + '篇诗词';
+            tip = '第' + (i + 1) + '周: ' + count + '篇诗文';
         }
         cells.push('<div class="week-cell ' + cls + '" data-tooltip="' + tip + '"></div>');
     }
@@ -3475,6 +3539,8 @@ async function loadSystemInfo() {
 }
 
 // --- 最新诗作 ---
+let _homeLatestPoems = [];
+
 async function loadLatestPoems() {
     // 确保成员缓存已加载（用于显示作者名称）
     await ensureMembersCached();
@@ -3485,6 +3551,7 @@ async function loadLatestPoems() {
     try {
         const res = await fetch(`${API_BASE}/poems?page=1&limit=3`);
         const poems = await res.json();
+        _homeLatestPoems = poems;
         
         if(poems.length === 0) {
             container.innerHTML = '<div class="empty-hint">暂无诗作</div>';
@@ -3492,7 +3559,7 @@ async function loadLatestPoems() {
         }
         
         container.innerHTML = poems.map(p => `
-            <div style="border-bottom:1px solid #eee; padding:10px 0; cursor:pointer;" onclick="showSection('poems')">
+            <div style="border-bottom:1px solid #eee; padding:10px 0; cursor:pointer;" onclick="openHomePoemDetail(${p.id})">
                 <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
                     <strong style="font-size:1em; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(p.title)}</strong>
                     <span style="${getPoemTypeStyle(p.type)} padding:2px 6px; border-radius:4px; font-size:0.75em; flex-shrink:0;">${escapeHtml(p.type)}</span>
@@ -3504,6 +3571,11 @@ async function loadLatestPoems() {
         console.error(e);
         container.innerHTML = '<div class="empty-hint">加载失败，请刷新重试</div>';
     }
+}
+
+function openHomePoemDetail(id) {
+    const p = _homeLatestPoems.find(x => x.id == id);
+    if (p) openPoemDetailView(p);
 }
 
 // --- 积分排行榜 ---
@@ -3555,16 +3627,11 @@ let _currentSearchReq = 0; // To track latest request
 
 function openPoemFromSearch(id) {
     const p = _searchCache.poems.find(x => x.id == id);
-    if(p) openPoemModal(p);
+    if(p) openPoemDetailView(p);
 }
 
 function openActivityFromSearch(id) {
-    let a = null;
-    if(_searchCache.activities) a = _searchCache.activities.find(x => x.id == id);
-    if(!a && typeof _cachedActivities !== 'undefined') a = _cachedActivities.find(x => x.id == id);
-    
-    if(a) openActivityModal(a);
-    else openActivityDetailView(id);
+    openActivityDetailView(id);
 }
 
 // This is called when user types in global search input
@@ -3706,8 +3773,11 @@ async function fetchSystemSettings() {
         const res = await fetch(`${API_BASE}/settings/system`);
         if(res.ok) {
             _systemSettings = await res.json();
-            // 更新网页标题
-            document.title = _systemSettings.system_name || '围炉诗社·理事台';
+            // 更新网页标题和页脚站名
+            const name = _systemSettings.system_name || '围炉诗社·理事台';
+            document.title = name;
+            const footerName = document.getElementById('footer-site-name');
+            if (footerName) footerName.textContent = name;
         }
         
         // 管理员额外获取salt和登录有效期（需要鉴权）
@@ -3753,6 +3823,9 @@ async function saveSystemName() {
         });
         if(res.ok) {
             _systemSettings.system_name = value;
+            document.title = value;
+            const footerName = document.getElementById('footer-site-name');
+            if (footerName) footerName.textContent = value;
             alert('系统名称已更新');
         } else {
             const err = await res.json().catch(() => ({}));

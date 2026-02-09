@@ -676,6 +676,19 @@
         </div>
     </div>
 
+    <!-- Read-Only Poem Detail Modal -->
+    <div id="modal-poem-view" class="modal hidden">
+        <div class="modal-content" style="max-width:700px;">
+            <span class="close" onclick="toggleModal('modal-poem-view')"></span>
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-top:35px; margin-bottom:20px;">
+                <h3 id="view-poem-title" style="margin:0; flex:1; padding-right:12px;"></h3>
+                <span id="view-poem-type" style="flex-shrink:0;"></span>
+            </div>
+            <div id="view-poem-container"></div>
+            <div id="view-poem-actions" style="margin-top:20px; padding-top:15px; border-top:1px solid #eee; display:flex; justify-content:flex-end; gap:10px;"></div>
+        </div>
+    </div>
+
     <div id="modal-finance" class="modal hidden">
         <div class="modal-content">
             <span class="close" onclick="toggleModal('modal-finance')"></span>
@@ -822,8 +835,14 @@
     </div>
     
     </div> <!-- Close main-app div -->
+    <footer class="site-footer">
+        <p>&copy; <span id="footer-year"></span> <span id="footer-site-name"></span></p>
+    </footer>
     <script src="/static/marked.umd.js"></script>
     <script src="/static/purify.min.js"></script>
     <script src="/static/app.js"></script>
+    <script>
+        document.getElementById('footer-year').textContent = new Date().getFullYear();
+    </script>
 </body>
 </html>
