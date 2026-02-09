@@ -1,6 +1,6 @@
 # 围炉诗社·理事台 (Weilushishe Lishitai)
 
-![Version](https://img.shields.io/badge/version-v1.1.0-blue)
+![Version](https://img.shields.io/badge/version-v1.0.0-blue)
 ![Platform](https://img.shields.io/badge/platform-ESP32--S2-orange)
 ![Environment](https://img.shields.io/badge/environment-MicroPython_v1.25.0-green)
 
@@ -8,26 +8,28 @@
 
 ## 🌟 核心功能
 
-- **藏诗阁 (Poetry Management)**: 诗歌的发布、搜索、分页浏览、随机推荐及本地草稿保存。
+- **藏诗阁 (Poetry Management)**: 诗歌的发布、搜索、分页浏览、随机推荐、诗文详情页展示及本地草稿保存。
 - **活动大厅 (Activity Management)**: 诗社活动的规划、记录与状态追踪。
 - **聊天室 (Chat Room)**: 实时聊天室，消息缓存于内存（可配置，默认128KB），支持登录用户和游客（天干命名，可配置最大人数）。
 - **任务管理 (Task Management)**: 任务的创建、认领、提交、审批与驳回完整流程。
 - **成员名单 (Member Management)**: 成员信息维护、自定义字段、权限角色管理及密码修改。
 - **财务统计 (Finance Management)**: 简易的收支记录与财务透明化展示。
 - **积分系统 (Points System)**: 围炉值积分记录与年度排行榜。
+- **年度热力图 (Activity Heatmap)**: 首页年度诗词创作热力图（类似 GitHub 贡献图），直观展示创作与活动频率。
 - **系统监控 (System Monitoring)**: 实时监控 ESP32 的内存、存储空间、运行时长及网络状态。
 - **数据备份 (Data Backup)**: 支持全量备份导出/导入，以及单表数据的独立导出/导入。
-- **WiFi 管理**: 支持 STA/AP 自动切换、静态 IP 配置及自动重连机制。
+- **WiFi 管理**: 支持 STA/AP 自动切换、静态 IP 配置、自动重连机制及 NTP 时间同步（阿里云 NTP 服务器）。
 - **视觉反馈**: 通过呼吸灯 (BreathLED) 实时反馈系统工作状态。
 
 ## 🔐 安全特性
 
-- **Token 认证**: 基于 SHA256 签名的令牌鉴权机制，支持自动过期检测。
+- **Token 认证**: 基于 SHA256 签名的令牌鉴权机制，支持自动过期检测。登录令牌密钥与密码盐值独立，服务器重启后令牌自动失效。
 - **动态有效期**: 登录有效期可在管理后台动态配置（1-365 天）。
 - **密码安全**: SHA256 加盐哈希存储，盐值可自定义配置。
 - **角色权限**: 五级权限体系（超级管理员 > 管理员 > 理事/财务 > 社员），细粒度 API 访问控制。
 - **维护模式**: 支持一键开启维护模式，仅管理员可访问系统。
 - **游客访问**: 可配置是否允许未登录用户浏览公开内容（首页、诗歌、活动、成员等）。
+- **XSS 防护**: 集成 DOMPurify 对 Markdown 渲染内容进行 XSS 过滤。
 - **看门狗机制**: 自动喂狗定时器，防止系统死锁。
 
 ## 🔑 角色权限体系
@@ -60,7 +62,8 @@
 | 创建/编辑/删除事务 | ✓ | ✓ | ✓ | - | - |
 | 审批/驳回任务 | ✓ | ✓ | ✓ | - | - |
 | **诗词管理** | | | | | |
-| 发布/编辑/删除诗词 | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 发布/编辑/删除个人诗词 | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 编辑/删除他人诗词 | ✓ | ✓ | - | - | - |
 | **财务管理** | | | | | |
 | 财务记账（增删改） | ✓ | ✓ | - | ✓ | - |
 | 查看财务记录 | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -100,7 +103,7 @@
 - **系统监控**: [SystemStatus](lib/SystemStatus.py) - 状态指示灯控制与系统状态管理。
 - **日志系统**: [Logger](lib/Logger.py) - 分级日志系统，支持开发/生产环境切换。
 - **看门狗**: [Watchdog](lib/Watchdog.py) - 防系统锁死机制，可配置超时时间。
-- **前端技术**: 原生 HTML5 / CSS3 / JavaScript (ES6+)，采用 SPA (单页应用) 架构，集成 [marked.js](https://marked.js.org/) Markdown 渲染。
+- **前端技术**: 原生 HTML5 / CSS3 / JavaScript (ES6+)，采用 SPA (单页应用) 架构，集成 [marked.js](https://marked.js.org/) Markdown 渲染及 [DOMPurify](https://github.com/cure53/DOMPurify) XSS 防护。
 
 ## 📂 目录结构
 
@@ -115,6 +118,12 @@
 │   ├── lib/            # 核心功能组件库
 │   ├── data/           # 持久化 JSON/JSONL 数据文件
 │   └── static/         # 前端 Web 资源 (HTML/CSS/JS)
+│       ├── index.html   # 主页面
+│       ├── style.css    # 全局样式
+│       ├── app.js       # 应用逻辑
+│       ├── logo.png     # 站点图标
+│       ├── marked.umd.js    # Markdown 渲染库
+│       └── purify.min.js    # DOMPurify XSS 防护库
 ├── rules.md            # 技术开发规范
 └── README.md           # 本说明文档
 ```
@@ -143,5 +152,5 @@
 
 ---
 **版本**: v1.0.0  
-**更新日期**: 2026年2月9日  
+**更新日期**: 2026年2月10日  
 **维护者**: 围炉诗社理事会
