@@ -129,14 +129,13 @@ def hash_password(password):
     return ubinascii.hexlify(h.digest()).decode('utf-8')
 
 def verify_password(password, hashed):
-    """验证密码是否匹配哈希值，同时支持旧版明文密码兼容"""
+    """验证密码是否匹配哈希值（仅支持SHA256哈希）"""
     if not password or not hashed:
         return False
-    # 如果存储的是64位哈希值，则进行哈希比较
+    # 仅支持64位SHA256哈希比较，不再兼容旧版明文密码
     if len(hashed) == 64:
         return hash_password(password) == hashed
-    # 否则为旧版明文密码，直接比较
-    return password == hashed
+    return False
 
 # ============================================================================
 # 数据验证函数
@@ -315,7 +314,7 @@ def validate_custom_fields(custom_data, custom_fields_config):
 # Token 鉴权机制
 # ============================================================================
 # Token格式: user_id:expire_timestamp:signature
-# signature = sha256(user_id:expire_timestamp:secret_key)[:32]
+# signature = sha256(user_id:expire_timestamp:secret_key)
 # 签名密钥: 每次启动随机生成128位，与密码盐值(password_salt)完全独立
 # 默认过期时间: 30天
 
@@ -344,7 +343,7 @@ def generate_token(user_id):
     # 生成签名
     sign_data = f"{user_id}:{expire_time}:{secret}"
     h = uhashlib.sha256(sign_data.encode('utf-8'))
-    signature = ubinascii.hexlify(h.digest()).decode('utf-8')[:32]
+    signature = ubinascii.hexlify(h.digest()).decode('utf-8')
     # 组装Token
     token = f"{user_id}:{expire_time}:{signature}"
     # 返回token和有效期秒数（前端用自己的时间计算过期时间点）
@@ -376,7 +375,7 @@ def verify_token(token):
         secret = _get_token_secret()
         sign_data = f"{user_id}:{expire_time}:{secret}"
         h = uhashlib.sha256(sign_data.encode('utf-8'))
-        expected_signature = ubinascii.hexlify(h.digest()).decode('utf-8')[:32]
+        expected_signature = ubinascii.hexlify(h.digest()).decode('utf-8')
         
         if provided_signature != expected_signature:
             return False, None, "Token签名无效"
@@ -388,14 +387,11 @@ def verify_token(token):
 
 def check_token(request):
     """
-    从请求中验证Token（支持Header和参数两种方式）
+    从请求中验证Token（支持Header和请求体两种方式）
     返回: (是否有效, user_id或None, 错误响应或None)
     """
-    # 优先从Header获取
+    # 从Header获取
     token = request.headers.get('authorization', '').replace('Bearer ', '')
-    # 其次从URL参数获取
-    if not token:
-        token = request.args.get('token', '')
     # POST请求也尝试从body获取
     if not token and request.json:
         token = request.json.get('token', '')
@@ -649,9 +645,13 @@ class JsonlDB:
                     except Exception as e:
                         debug(f"删除解析记录失败: {e}", "DB")
             
+            if not found:
+                # 未找到目标记录，清理临时文件，跳过无意义的文件替换
+                os.remove(tmp_path)
+                return False
             os.remove(self.filepath)
             os.rename(tmp_path, self.filepath)
-            return found
+            return True
         except Exception as e:
             error(f"删除记录失败: {e}", "DB")
             if file_exists(tmp_path): os.remove(tmp_path)
@@ -807,33 +807,45 @@ def can_manage_member(operator_id, operator_role, target_member_id, target_membe
     
     return True, None
 
+# 用户角色缓存 {user_id: role}，避免每次请求都扫描members文件
+_role_cache = {}
+
+def invalidate_role_cache(user_id=None):
+    """清除角色缓存。user_id为None时清除全部，否则清除指定用户"""
+    global _role_cache
+    if user_id is None:
+        _role_cache = {}
+    elif user_id in _role_cache:
+        del _role_cache[user_id]
+
 def get_operator_role(request):
     """
     从请求中获取操作者角色（通过Token验证）
     返回: (user_id, role) 或 (None, None)
+    优先从缓存读取角色，未命中时按ID查找单条记录
     """
     try:
         data = request.json if request.json else {}
         
-        # 从Header、URL参数或请求体获取Token
+        # 从Header或请求体获取Token
         token = request.headers.get('authorization', '').replace('Bearer ', '')
         if not token:
-            token = request.args.get('token', '') or data.get('token', '')
+            token = data.get('token', '')
         
         if not token:
             return None, None
         
         valid, user_id, err_msg = verify_token(token)
         if valid and user_id:
-            # Token有效，查询用户角色
-            with open(db_members.filepath, 'r') as f:
-                for line in f:
-                    try:
-                        m = json.loads(line)
-                        if m.get('id') == user_id:
-                            return user_id, m.get('role', 'member')
-                    except:
-                        pass
+            # 优先查缓存
+            if user_id in _role_cache:
+                return user_id, _role_cache[user_id]
+            # 缓存未命中，按ID精确查找
+            member = db_members.get_by_id(user_id)
+            if member:
+                role = member.get('role', 'member')
+                _role_cache[user_id] = role
+                return user_id, role
     except Exception as e:
         debug(f"获取操作者角色失败: {e}", "Auth")
     return None, None
@@ -851,7 +863,7 @@ def require_login(f):
         data = request.json if request.json else {}
         token = request.headers.get('authorization', '').replace('Bearer ', '')
         if not token:
-            token = request.args.get('token', '') or data.get('token', '')
+            token = data.get('token', '')
         
         if not token:
             return Response('{"error": "请先登录"}', 401, {'Content-Type': 'application/json'})
@@ -894,7 +906,7 @@ def check_login(request):
     data = request.json if request.json else {}
     token = request.headers.get('authorization', '').replace('Bearer ', '')
     if not token:
-        token = request.args.get('token', '') or data.get('token', '')
+        token = data.get('token', '')
     
     if not token:
         return False, None, Response('{"error": "请先登录"}', 401, {'Content-Type': 'application/json'})
@@ -911,8 +923,6 @@ def check_login_get(request):
     返回: (已登录, 错误响应或None)
     """
     token = request.headers.get('authorization', '').replace('Bearer ', '')
-    if not token:
-        token = request.args.get('token', '')
     
     if not token:
         return False, Response('{"error": "请先登录"}', 401, {'Content-Type': 'application/json'})
@@ -964,13 +974,23 @@ def record_login_log(member_id, member_name, phone, status, ip=''):
         debug(f"清理登录日志失败: {e}", "Log")
 
 # Legacy for settings (kept as simple JSON for now)
+_settings_cache = None  # 内存缓存，避免每次API调用都读取Flash
+
+def invalidate_settings_cache():
+    """清除设置缓存，下次get_settings()将重新从文件读取"""
+    global _settings_cache
+    _settings_cache = None
+
 def get_settings():
-    """获取系统设置，从合并后的配置文件中读取"""
+    """获取系统设置，优先从内存缓存读取，缓存未命中时从文件加载"""
+    global _settings_cache
+    if _settings_cache is not None:
+        return _settings_cache
     try:
         with open('data/config.json', 'r') as f:
             config = json.load(f)
             # 返回系统设置相关的键值
-            return {
+            _settings_cache = {
                 'custom_member_fields': config.get('custom_member_fields', []),
                 'password_salt': config.get('password_salt', 'weilu2018'),
                 'points_name': config.get('points_name', '围炉值'),
@@ -983,6 +1003,7 @@ def get_settings():
                 'chat_max_users': config.get('chat_max_users', 20),
                 'chat_cache_size': config.get('chat_cache_size', 128)
             }
+            return _settings_cache
     except: 
         return {
             'custom_member_fields': [],
@@ -1013,6 +1034,8 @@ def save_settings(data):
         # 保存回配置文件
         with open('data/config.json', 'w') as f:
             json.dump(config, f)
+        # 清除缓存，下次读取时重新加载
+        invalidate_settings_cache()
     except Exception as e:
         error(f"保存设置失败: {e}", "Settings")
 
@@ -1151,6 +1174,11 @@ def create_poem(request):
     # 必填项验证
     if not data.get('title') or not data.get('content'):
         return Response('{"error": "诗名和正文为必填项"}', 400, {'Content-Type': 'application/json'})
+    
+    # 从Token获取作者ID，确保author_id不可伪造
+    user_id, _ = get_operator_role(request)
+    if user_id:
+        data['author_id'] = user_id
     
     new_id = db_poems.get_max_id() + 1
     data['id'] = new_id
@@ -1381,19 +1409,25 @@ def unclaim_task(request):
     data = request.json
     tid = data.get('task_id')
     
-    task_found = False
+    # 身份验证：获取当前操作者ID和角色
+    operator_id, operator_role = get_operator_role(request)
+    
+    # 先读取任务，验证操作者身份
+    task = db_tasks.get_by_id(tid)
+    if not task or task.get('status') != 'claimed':
+        return Response('Task not found or cannot unclaim', 404)
+    
+    # 只有任务领取者本人或管理员可以撤销
+    if task.get('assignee_id') != operator_id and operator_role not in ['super_admin', 'admin']:
+        return Response('{"error": "只能撤销自己领取的任务"}', 403, {'Content-Type': 'application/json'})
     
     def task_updater(t):
-        nonlocal task_found
-        if t.get('status') == 'claimed':
-            t['status'] = 'open'
-            t['assignee'] = None
-            t['claimed_at'] = None
-            task_found = True
+        t['status'] = 'open'
+        t['assignee'] = None
+        t['assignee_id'] = None
+        t['claimed_at'] = None
             
     db_tasks.update(tid, task_updater)
-    
-    if not task_found: return Response('Task not found or cannot unclaim', 404)
     return {"status": "success"}
 
 @api_route('/api/tasks/submit', methods=['POST'])
@@ -1403,18 +1437,23 @@ def submit_task(request):
     data = request.json
     tid = data.get('task_id')
     
-    task_found = False
+    # 身份验证：获取当前操作者ID和角色
+    operator_id, operator_role = get_operator_role(request)
+    
+    # 先读取任务，验证操作者身份
+    task = db_tasks.get_by_id(tid)
+    if not task or task.get('status') != 'claimed':
+        return Response('Task not claimable', 404)
+    
+    # 只有任务领取者本人或管理员可以提交
+    if task.get('assignee_id') != operator_id and operator_role not in ['super_admin', 'admin']:
+        return Response('{"error": "只能提交自己领取的任务"}', 403, {'Content-Type': 'application/json'})
     
     def task_updater(t):
-        nonlocal task_found
-        if t.get('status') == 'claimed':
-            t['status'] = 'submitted'
-            t['submitted_at'] = get_current_time()
-            task_found = True
+        t['status'] = 'submitted'
+        t['submitted_at'] = get_current_time()
             
     db_tasks.update(tid, task_updater)
-    
-    if not task_found: return Response('Task not claimable', 404)
     return {"status": "success"}
 
 @api_route('/api/tasks/approve', methods=['POST'])
@@ -1425,29 +1464,12 @@ def approve_task(request):
     tid = data.get('task_id')
     force = data.get('force', False)  # 管理员强制验收标志
     
-    reward = 0
-    assignee_name = None
-    task_status = None
-    task_found = False
-    
-    def task_updater(t):
-        nonlocal reward, assignee_name, task_status, task_found
-        task_found = True
-        task_status = t.get('status')
-        # 允许验收submitted状态，或force模式下的claimed状态
-        if task_status == 'submitted' or (force and task_status == 'claimed'):
-            t['status'] = 'completed'
-            t['completed_at'] = get_current_time()
-            if not t.get('submitted_at'):
-                t['submitted_at'] = get_current_time()
-            reward = t.get('reward', 0)
-            assignee_name = t.get('assignee')
-            
-    db_tasks.update(tid, task_updater)
-    
-    # 任务不存在
-    if not task_found:
+    # 先读取任务，校验状态后再决定是否写入
+    task = db_tasks.get_by_id(tid)
+    if not task:
         return Response('Task not found', 404)
+    
+    task_status = task.get('status')
     
     # 任务已完成（可能是重复请求）
     if task_status == 'completed':
@@ -1461,20 +1483,29 @@ def approve_task(request):
     if task_status == 'claimed' and not force:
         return Response('Task not submitted yet', 400)
     
-    # 发放奖励
-    if assignee_name and reward > 0:
-        members = db_members.get_all()
-        target_mid = None
-        for m in members:
-            if m.get('name') == assignee_name:
-                target_mid = m.get('id')
-                break
-                
-        if target_mid:
-            def member_updater(m):
-                m['points'] = m.get('points', 0) + reward
-            db_members.update(target_mid, member_updater)
-            record_points_change(target_mid, assignee_name, reward, '完成任务')
+    # 状态校验通过，执行写入
+    reward = 0
+    assignee_id = None
+    assignee_name = None
+    
+    def task_updater(t):
+        nonlocal reward, assignee_id, assignee_name
+        t['status'] = 'completed'
+        t['completed_at'] = get_current_time()
+        if not t.get('submitted_at'):
+            t['submitted_at'] = get_current_time()
+        reward = t.get('reward', 0)
+        assignee_id = t.get('assignee_id')
+        assignee_name = t.get('assignee')
+            
+    db_tasks.update(tid, task_updater)
+    
+    # 发放奖励（通过assignee_id精确匹配）
+    if assignee_id and reward > 0:
+        def member_updater(m):
+            m['points'] = m.get('points', 0) + reward
+        db_members.update(assignee_id, member_updater)
+        record_points_change(assignee_id, assignee_name or '', reward, '完成任务')
     
     return {"status": "success", "gained": reward}
 
@@ -1627,12 +1658,8 @@ def update_member_route(request):
     # 获取操作者ID和角色
     operator_id, operator_role = get_operator_role(request)
     
-    # 获取目标成员的当前角色，检查是否有权限管理
-    target_member = None
-    for m in db_members.get_all():
-        if m.get('id') == mid:
-            target_member = m
-            break
+    # 按ID查找目标成员（避免get_all全量加载）
+    target_member = db_members.get_by_id(mid)
     
     if not target_member:
         return Response('{"error": "成员不存在"}', 404, {'Content-Type': 'application/json'})
@@ -1670,8 +1697,8 @@ def update_member_route(request):
         valid, err = validate_phone(data.get('phone'))
         if not valid:
             return Response(json.dumps({"error": err}), 400, {'Content-Type': 'application/json'})
-        # 手机号唯一性检查（排除自己）
-        for m in db_members.get_all():
+        # 手机号唯一性检查（按号码流式扫描，找到即停）
+        for m in db_members.iter_records():
             if m.get('phone') == data.get('phone') and m.get('id') != mid:
                 return Response('{"error": "该手机号已被其他用户使用"}', 400, {'Content-Type': 'application/json'})
     
@@ -1707,19 +1734,12 @@ def update_member_route(request):
         except (ValueError, TypeError):
             data['points'] = 0
     
-    # 记录积分变动（如果有）
+    # 记录积分变动（复用已查到的target_member，避免再次读文件）
     points_change = 0
-    member_name = ''
-    old_points = 0
+    member_name = target_member.get('name', '')
     
     if 'points' in data:
-        # 先获取原积分值
-        members = db_members.get_all()
-        for m in members:
-            if m.get('id') == mid:
-                old_points = int(m.get('points', 0))
-                member_name = m.get('name', '')
-                break
+        old_points = int(target_member.get('points', 0))
         points_change = data['points'] - old_points
     
     def updater(m):
@@ -1727,6 +1747,9 @@ def update_member_route(request):
             if k in data: m[k] = data[k]
     
     if db_members.update(mid, updater):
+        # 角色可能变更，清除该用户角色缓存
+        if 'role' in data:
+            invalidate_role_cache(mid)
         # 如果积分有变动，记录日志
         if points_change != 0 and member_name:
             record_points_change(mid, member_name, points_change, '管理员调整')
@@ -1807,7 +1830,9 @@ def delete_member_route(request):
     if not allowed:
         return Response(json.dumps({"error": err}), 403, {'Content-Type': 'application/json'})
     
-    if db_members.delete(member_id): return {"status": "success"}
+    if db_members.delete(member_id):
+        invalidate_role_cache(member_id)
+        return {"status": "success"}
     return Response("Error", 500)
 
 @api_route('/api/points/yearly_ranking', methods=['GET'])
@@ -2106,6 +2131,15 @@ def add_finance(request):
     if amount is None or not data.get('summary') or not data.get('handler') or not data.get('date'):
         return Response('{"error": "金额、摘要、经办人和记账日期为必填项"}', 400, {'Content-Type': 'application/json'})
     
+    # 金额类型校验：必须为数值且大于0
+    try:
+        amount = float(amount)
+        if amount <= 0:
+            return Response('{"error": "金额必须大于0"}', 400, {'Content-Type': 'application/json'})
+    except (ValueError, TypeError):
+        return Response('{"error": "金额必须为有效数字"}', 400, {'Content-Type': 'application/json'})
+    data['amount'] = amount
+    
     data['id'] = db_finance.get_max_id() + 1
     # 计算并存储操作后余额
     last_balance = _get_last_balance()
@@ -2128,6 +2162,15 @@ def update_finance(request):
     amount = data.get('amount')
     if amount is None or not data.get('summary') or not data.get('handler') or not data.get('date'):
         return Response('{"error": "金额、摘要、经办人和记账日期为必填项"}', 400, {'Content-Type': 'application/json'})
+    
+    # 金额类型校验：必须为数值且大于0
+    try:
+        amount = float(amount)
+        if amount <= 0:
+            return Response('{"error": "金额必须大于0"}', 400, {'Content-Type': 'application/json'})
+    except (ValueError, TypeError):
+        return Response('{"error": "金额必须为有效数字"}', 400, {'Content-Type': 'application/json'})
+    data['amount'] = amount
     
     fid = data.get('id')
     if _rewrite_finance_file(update_id=fid, update_data=data):
@@ -2336,6 +2379,7 @@ def save_wifi_config(data):
         # 保存完整配置
         with open('data/config.json', 'w') as f:
             json.dump(config, f)
+        invalidate_settings_cache()
         return True
     except:
         return False
@@ -2657,6 +2701,9 @@ def backup_import_table(request):
                     f.write(json.dumps(item) + "\n")
             gc.collect()
             watchdog.feed()
+            # members表导入后清除角色缓存
+            if table == 'members':
+                invalidate_role_cache()
             info(f"分表导入 [{table}]: 成功写入 {len(table_data)} 条记录", "Backup")
             return {"status": "success", "table": table, "count": len(table_data)}
         
@@ -2670,6 +2717,7 @@ def backup_import_table(request):
                     config[key] = table_data[key]
             with open('data/config.json', 'w') as f:
                 json.dump(config, f)
+            invalidate_settings_cache()
             gc.collect()
             return {"status": "success", "table": table}
         
@@ -2699,6 +2747,7 @@ def backup_import_table(request):
                     config[key] = table_data[key]
             with open('data/config.json', 'w') as f:
                 json.dump(config, f)
+            invalidate_settings_cache()
             gc.collect()
             return {"status": "success", "table": table}
         

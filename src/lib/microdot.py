@@ -194,6 +194,13 @@ class Microdot:
         req.json = None
         gc.collect()
             
+        # 注入安全响应头
+        res.headers['X-Content-Type-Options'] = 'nosniff'
+        res.headers['X-Frame-Options'] = 'DENY'
+        # API响应禁止缓存，防止敏感数据泄露
+        if req.path.startswith('/api'):
+            res.headers['Cache-Control'] = 'no-store'
+        
         try:
             await res.write(writer)
             writer.close()

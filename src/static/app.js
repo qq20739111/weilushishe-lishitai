@@ -588,7 +588,9 @@ async function checkLogin() {
             // Token本地未过期，向服务器验证Token是否仍然有效（服务器重启会使Token失效）
             try {
                 const token = currentUser.token;
-                const res = await fetch(`${API_BASE}/check-token?token=${token}`);
+                const res = await fetch(`${API_BASE}/check-token`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
                 if (res.status === 401) {
                     // 静默清除失效的登录状态，页面会自动显示登录界面
                     localStorage.removeItem('user');
@@ -783,7 +785,7 @@ function getAuthHeaders(extraHeaders = {}) {
 
 /**
  * 封装带认证的fetch请求
- * 自动添加Token到请求头或URL参数
+ * 统一通过 Authorization Header 传输Token（避免Token暴露在URL中）
  * @param {string} url - 请求URL
  * @param {object} options - fetch选项
  * @returns {Promise<Response>}
@@ -796,19 +798,15 @@ async function fetchWithAuth(url, options = {}) {
         throw new Error('请先登录');
     }
     
-    // 对于GET请求，Token加到URL参数
+    // 所有请求统一通过 Header 传输 Token
+    options.headers = options.headers || {};
     if (!options.method || options.method.toUpperCase() === 'GET') {
-        const separator = url.includes('?') ? '&' : '?';
-        if (token) {
-            url = `${url}${separator}token=${token}`;
-        }
+        // GET 请求不需要 Content-Type
     } else {
-        // 对于POST等请求，Token加到Header
-        options.headers = options.headers || {};
         options.headers['Content-Type'] = options.headers['Content-Type'] || 'application/json';
-        if (token) {
-            options.headers['Authorization'] = `Bearer ${token}`;
-        }
+    }
+    if (token) {
+        options.headers['Authorization'] = `Bearer ${token}`;
     }
     
     const response = await fetch(url, options);
@@ -4942,7 +4940,7 @@ function renderSingleMessage(msg) {
     return `
         <div class="${classes}">
             <div class="chat-message-header">
-                <span class="chat-message-user ${isGuest ? 'guest' : ''}">${msg.user_name}</span>
+                <span class="chat-message-user ${isGuest ? 'guest' : ''}">${escapeHtml(msg.user_name)}</span>
                 <span class="chat-message-time">${timeStr}</span>
             </div>
             <div class="chat-message-content">${escapeHtml(msg.content)}</div>
