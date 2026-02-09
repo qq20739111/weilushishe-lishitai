@@ -1626,7 +1626,7 @@ function getSmartDisplayName(memberId, fallbackName) {
 }
 
 function editMemberClick(id) {
-    const member = _cachedMembers.find(m => m.id === id);
+    const member = _memberDisplayList.find(m => m.id === id) || _cachedMembers.find(m => m.id === id);
     if (member) openMemberModal(member);
 }
 
@@ -1690,34 +1690,75 @@ function getAssignableRoles(operatorRole) {
 // ============================================================================
 // 社员管理模块
 // ============================================================================
+let _memberDisplayList = [];   // 分页展示列表（与_cachedMembers全局缓存分离）
+let _memberPage = 1;           // 分页：当前页码
+let _memberHasMore = true;     // 分页：是否还有下一页
 
 /**
- * 获取社员列表并渲染
- * 根据当前用户角色显示编辑/删除按钮
- * 未登录用户只能看到雅号和围炉值
+ * 获取社员列表（支持分页）
+ * _cachedMembers 由 ensureMembersCached() 管理，用于全局名称查找
+ * _memberDisplayList 用于分页展示
+ * @param {boolean} isLoadMore - 是否为加载更多
  */
-async function fetchMembers() {
-    showLoading('member-list');
+async function fetchMembers(isLoadMore = false) {
+    if (!isLoadMore) {
+        _memberPage = 1;
+        _memberHasMore = true;
+        _memberDisplayList = [];
+        // 清空全局缓存，以便下次 ensureMembersCached() 重新加载
+        _cachedMembers = [];
+        showLoading('member-list');
+    }
+    
+    if (isLoadMore && !_memberHasMore) return;
     
     try {
-        // 未登录时使用 public 模式，只获取公开信息
         const isLoggedIn = !!currentUser;
-        const url = isLoggedIn ? `${API_BASE}/members` : `${API_BASE}/members?public=1`;
+        const limit = 12;
+        let url = `${API_BASE}/members?page=${_memberPage}&limit=${limit}`;
+        if (!isLoggedIn) url += '&public=1';
+        
         const res = await fetch(url);
         if (!res.ok) throw new Error('Failed to fetch members');
-        _cachedMembers = await res.json();
+        const items = await res.json();
+        
+        if (items.length < limit) _memberHasMore = false;
+        else _memberPage++;
+        
+        if (isLoadMore) {
+            _memberDisplayList = [..._memberDisplayList, ...items];
+        } else {
+            _memberDisplayList = items;
+        }
+        
+        renderMembers();
     } catch (e) {
         console.error(e);
-        showEmptyState('member-list', '😕', '加载失败，请刷新重试');
-        return;
+        if (!isLoadMore) showEmptyState('member-list', '😕', '加载失败，请刷新重试');
     }
+}
 
+function loadMoreMembers() {
+    fetchMembers(true);
+}
+
+function renderMembers() {
     const container = document.getElementById('member-list');
     const isLoggedIn = !!currentUser;
     const canEdit = isLoggedIn && ['super_admin', 'admin', 'director'].includes(currentUser?.role);
     const canDelete = isLoggedIn && ['super_admin', 'admin'].includes(currentUser?.role);
     
-    if(_cachedMembers.length === 0) {
+    // 管理"加载更多"按钮
+    let loadMoreBtn = document.getElementById('member-load-more');
+    if (loadMoreBtn) {
+        if (_memberHasMore) {
+            loadMoreBtn.classList.remove('hidden');
+        } else {
+            loadMoreBtn.classList.add('hidden');
+        }
+    }
+    
+    if (_memberDisplayList.length === 0) {
         if (isLoggedIn) {
             showEmptyState('member-list', '👥', '暂无社员，快来录入第一位社员吧！', '录入社员', 'openMemberModal()');
         } else {
@@ -1726,16 +1767,12 @@ async function fetchMembers() {
         return;
     }
 
-    container.innerHTML = _cachedMembers.map(m => {
-        // 未登录时只显示雅号，登录后显示雅号或姓名
+    container.innerHTML = _memberDisplayList.map(m => {
         const displayName = m.alias || (isLoggedIn ? m.name : '社员');
-        // 检查当前用户是否有权限编辑此成员（传入操作者ID和目标成员ID）
         const canEditThis = canEdit && canManageMember(currentUser?.id, currentUser?.role, m.id, m.role);
-        // 删除权限：超管和管理员可删除比自己权限低的用户，但超管不能被删除，也不能删除自己
         const canDeleteThis = canDelete && m.role !== 'super_admin' && m.id !== currentUser?.id && canManageMember(currentUser?.id, currentUser?.role, m.id, m.role);
         
         if (!isLoggedIn) {
-            // 未登录用户只看到雅号和围炉值
             return `
             <div class="member-card">
                 <div class="member-avatar">${escapeHtml(displayName.charAt(0))}</div>
@@ -1747,7 +1784,6 @@ async function fetchMembers() {
             `;
         }
         
-        // 登录用户看到完整信息
         return `
         <div class="member-card">
             <div class="member-avatar">${escapeHtml(displayName.charAt(0))}</div>
@@ -2021,7 +2057,7 @@ async function deleteMember(id, event) {
     }
     
     // 前端检测：超级管理员不能被删除
-    const member = _cachedMembers.find(m => m.id === id);
+    const member = _memberDisplayList.find(m => m.id === id) || _cachedMembers.find(m => m.id === id);
     if (member && member.role === 'super_admin') {
         alert('超级管理员不能被删除');
         return;
@@ -2073,9 +2109,16 @@ async function deleteMember(id, event) {
 }
 
 let _cachedFinance = [];
+let _financePage = 1;         // 分页：当前页码
+let _financeHasMore = true;   // 分页：是否还有下一页
 let editingFinanceId = null;
 
-async function fetchFinance() {
+/**
+ * 获取财务记录（支持分页）
+ * 首次加载时同步获取统计数据
+ * @param {boolean} isLoadMore - 是否为加载更多
+ */
+async function fetchFinance(isLoadMore = false) {
     // 权限控制：只有财务、管理员、超级管理员可以记账
     const addFinanceBtn = document.getElementById('btn-add-finance');
     if(addFinanceBtn && currentUser) {
@@ -2083,47 +2126,95 @@ async function fetchFinance() {
         addFinanceBtn.classList.toggle('hidden', !canRecord);
     }
     
-    try {
-        const res = await fetchWithAuth(`${API_BASE}/finance`);
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || '获取失败');
-        }
-        const records = await res.json();
-        _cachedFinance = records;
-        
-        let income = 0, expense = 0;
-        records.forEach(r => {
-            if(r.type === 'income') income += r.amount;
-            else expense += r.amount;
-        });
-        
-        document.getElementById('total-income').innerText = income.toLocaleString();
-        document.getElementById('total-expense').innerText = expense.toLocaleString();
-        document.getElementById('balance').innerText = (income - expense).toLocaleString();
-        
-        // 编辑/删除权限：仅超级管理员
-        const canEditFinance = currentUser && currentUser.role === 'super_admin';
-        
-        const tbody = document.getElementById('finance-list');
-        tbody.innerHTML = records.map(r => `
-        <tr>
-            <td>${r.date}</td>
-            <td>${escapeHtml(r.summary)}<br><small>${escapeHtml(r.category)}</small></td>
-            <td class="money ${r.type === 'income' ? 'plus' : 'minus'}">
-                ${r.type === 'income' ? '+' : '-'}${r.amount}
-            </td>
-            <td>${escapeHtml(r.handler)}</td>
-            ${canEditFinance ? `<td><button class="btn-edit-sm" onclick="openFinanceModal(${r.id})">编辑</button><button class="btn-del-sm" onclick="deleteFinance(${r.id}, event)">删除</button></td>` : ''}
-        </tr>
-    `).join('');
+    if (!isLoadMore) {
+        _financePage = 1;
+        _financeHasMore = true;
+        _cachedFinance = [];
+    }
     
-        // 动态控制表头操作列
-        const financeOpTh = document.getElementById('finance-op-th');
-        if (financeOpTh) financeOpTh.classList.toggle('hidden', !canEditFinance);
+    if (isLoadMore && !_financeHasMore) return;
+    
+    try {
+        const limit = 20;
+        
+        // 并行请求：首次加载时同时获取统计数据和列表数据
+        const fetchList = fetchWithAuth(`${API_BASE}/finance?page=${_financePage}&limit=${limit}`);
+        
+        if (!isLoadMore) {
+            // 首次加载：同时获取统计和列表
+            const fetchStats = fetchWithAuth(`${API_BASE}/finance/stats`);
+            const [listRes, statsRes] = await Promise.all([fetchList, fetchStats]);
+            
+            if (!listRes.ok) {
+                const err = await listRes.json().catch(() => ({}));
+                throw new Error(err.error || '获取失败');
+            }
+            
+            const items = await listRes.json();
+            if (items.length < limit) _financeHasMore = false;
+            else _financePage++;
+            _cachedFinance = items;
+            
+            // 更新统计数据
+            if (statsRes.ok) {
+                const stats = await statsRes.json();
+                document.getElementById('total-income').innerText = (stats.year_income || 0).toLocaleString();
+                document.getElementById('total-expense').innerText = (stats.year_expense || 0).toLocaleString();
+                document.getElementById('balance').innerText = (stats.balance || 0).toLocaleString();
+            }
+        } else {
+            // 加载更多：只获取列表
+            const listRes = await fetchList;
+            if (!listRes.ok) {
+                const err = await listRes.json().catch(() => ({}));
+                throw new Error(err.error || '获取失败');
+            }
+            const items = await listRes.json();
+            if (items.length < limit) _financeHasMore = false;
+            else _financePage++;
+            _cachedFinance = [..._cachedFinance, ...items];
+        }
+        
+        renderFinance();
     } catch(e) {
         console.error('获取财务记录失败:', e);
-        alert('获取财务记录失败: ' + e.message);
+        if (!isLoadMore) alert('获取财务记录失败: ' + e.message);
+    }
+}
+
+function loadMoreFinance() {
+    fetchFinance(true);
+}
+
+function renderFinance() {
+    // 编辑/删除权限：仅超级管理员
+    const canEditFinance = currentUser && currentUser.role === 'super_admin';
+    
+    const tbody = document.getElementById('finance-list');
+    tbody.innerHTML = _cachedFinance.map(r => `
+    <tr>
+        <td>${r.date}</td>
+        <td>${escapeHtml(r.summary)}<br><small>${escapeHtml(r.category)}</small></td>
+        <td class="money ${r.type === 'income' ? 'plus' : 'minus'}">
+            ${r.type === 'income' ? '+' : '-'}${r.amount}
+        </td>
+        <td>${escapeHtml(r.handler)}</td>
+        ${canEditFinance ? `<td><button class="btn-edit-sm" onclick="openFinanceModal(${r.id})">编辑</button><button class="btn-del-sm" onclick="deleteFinance(${r.id}, event)">删除</button></td>` : ''}
+    </tr>
+`).join('');
+
+    // 动态控制表头操作列
+    const financeOpTh = document.getElementById('finance-op-th');
+    if (financeOpTh) financeOpTh.classList.toggle('hidden', !canEditFinance);
+    
+    // 管理"加载更多"按钮
+    let loadMoreBtn = document.getElementById('finance-load-more');
+    if (loadMoreBtn) {
+        if (_financeHasMore) {
+            loadMoreBtn.classList.remove('hidden');
+        } else {
+            loadMoreBtn.classList.add('hidden');
+        }
     }
 }
 
@@ -2131,14 +2222,14 @@ async function fetchFinance() {
 // 事务与积分模块
 // ============================================================================
 let _cachedTasks = [];
+let _taskPage = 1;         // 分页：当前页码
+let _taskHasMore = true;   // 分页：是否还有下一页
 
 /**
- * 获取任务列表并渲染
- * 显示任务状态、领取/提交/审批按钮
- * 根据用户角色控制操作权限
+ * 获取任务列表（支持分页）
+ * @param {boolean} isLoadMore - 是否为加载更多
  */
-async function fetchTasks() {
-    // 确保成员缓存已加载（用于显示发布者/领取者名称）
+async function fetchTasks(isLoadMore = false) {
     await ensureMembersCached();
     
     // 动态更新标题
@@ -2154,103 +2245,128 @@ async function fetchTasks() {
         addTaskBtn.classList.toggle('hidden', !canCreate);
     }
     
-    showLoading('task-list');
+    if (!isLoadMore) {
+        _taskPage = 1;
+        _taskHasMore = true;
+        _cachedTasks = [];
+        showLoading('task-list');
+    }
+    
+    if (isLoadMore && !_taskHasMore) return;
     
     try {
-        const res = await fetchWithAuth(`${API_BASE}/tasks`);
+        const limit = 10;
+        const res = await fetchWithAuth(`${API_BASE}/tasks?page=${_taskPage}&limit=${limit}`);
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || '获取失败');
         }
-        const tasks = await res.json();
-        _cachedTasks = tasks;
-
-        const container = document.getElementById('task-list');
+        const items = await res.json();
         
-        if(tasks.length === 0) {
-            showEmptyState('task-list', '📋', '暂无待办事务，一切顺利！');
-            return;
+        if (items.length < limit) _taskHasMore = false;
+        else _taskPage++;
+        
+        if (isLoadMore) {
+            _cachedTasks = [..._cachedTasks, ...items];
+        } else {
+            _cachedTasks = items;
         }
         
-        const pointsName = getPointsName();
-        const userName = currentUser ? currentUser.name : '';
-        const isManager = currentUser && ['super_admin', 'admin', 'director'].includes(currentUser.role);
-        
-        container.innerHTML = tasks.map(t => {
-            const statusInfo = getTaskStatusInfo(t.status);
-            const isCreator = t.creator === userName;
-            const isAssignee = t.assignee === userName;
-            
-            let actionButtons = '';
-            
-            if(t.status === 'open') {
-                // 待领取：所有人可领取
-                actionButtons = `<button onclick="claimTask(${t.id}, event)" class="btn-claim">领取任务</button>`;
-            } else if(t.status === 'claimed') {
-                // 进行中
-                if(isAssignee) {
-                    // 领取者：可提交或撤销
-                    actionButtons = `
-                        <button onclick="submitTaskComplete(${t.id}, event)" class="btn-submit">提交完成</button>
-                        <button onclick="unclaimTask(${t.id}, event)" class="btn-unclaim" style="margin-left:8px;">撤销领取</button>
-                    `;
-                    // 管理员额外显示直接验收按钮
-                    if(isManager) {
-                        actionButtons += `<button onclick="forceApproveTask(${t.id}, event)" class="btn-approve" style="margin-left:8px;">直接验收</button>`;
-                    }
-                } else if(isManager) {
-                    // 管理者：可撤销他人领取或直接验收
-                    actionButtons = `
-                        <button onclick="forceApproveTask(${t.id}, event)" class="btn-approve">直接验收</button>
-                        <button onclick="unclaimTask(${t.id}, event)" class="btn-unclaim" style="margin-left:8px;">撤销领取</button>
-                    `;
-                }
-            } else if(t.status === 'submitted' && (isCreator || isManager)) {
-                // 待验收：发布者或管理员可审批
-                actionButtons = `
-                    <button onclick="approveTask(${t.id}, event)" class="btn-approve">通过</button>
-                    <button onclick="rejectTask(${t.id}, event)" class="btn-reject">退回</button>
-                `;
-            }
-            
-            // 删除按钮
-            // 管理员可删除任何状态的任务，发布者只能删除未完成的任务
-            let deleteBtn = '';
-            if(isManager || (isCreator && t.status !== 'completed')) {
-                deleteBtn = `<button onclick="deleteTask(${t.id}, event)" class="btn-delete" style="margin-left:10px;">删除</button>`;
-            }
-            
-            // 编辑按钮（仅理事及以上权限）
-            let editBtn = '';
-            if(isManager) {
-                editBtn = `<button onclick="openTaskModal(${t.id})" class="btn-edit" style="margin-left:10px; background:#2196F3;">编辑</button>`;
-            }
-            
-            return `
-            <div class="card task-item">
-                <h4>${escapeHtml(t.title)} <span class="task-status ${statusInfo.className}">${statusInfo.label}</span></h4>
-                <div class="markdown-content">${renderMarkdown(t.description || '')}</div>
-                <div class="task-meta">
-                    <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
-                        <small>
-                            奖励: <span class="task-reward">${t.reward}</span> ${pointsName}
-                            ${t.creator ? `&nbsp;|&nbsp;发布者: ${getSmartDisplayName(t.creator_id, t.creator)}` : ''}
-                            ${t.assignee ? `&nbsp;|&nbsp;领取者: ${getSmartDisplayName(t.assignee_id, t.assignee)}` : ''}
-                        </small>
-                    </div>
-                    <div style="margin-left:auto; display:flex; align-items:center;">
-                        ${actionButtons}
-                        ${editBtn}
-                        ${deleteBtn}
-                    </div>
-                </div>
-            </div>
-            `;
-        }).join('');
+        renderTasks();
     } catch(e) { 
         console.error(e);
-        showEmptyState('task-list', '😕', '加载失败，请刷新重试');
+        if (!isLoadMore) showEmptyState('task-list', '😕', '加载失败，请刷新重试');
     }
+}
+
+function loadMoreTasks() {
+    fetchTasks(true);
+}
+
+function renderTasks() {
+    const container = document.getElementById('task-list');
+    
+    // 管理"加载更多"按钮
+    let loadMoreBtn = document.getElementById('task-load-more');
+    if (loadMoreBtn) {
+        if (_taskHasMore) {
+            loadMoreBtn.classList.remove('hidden');
+        } else {
+            loadMoreBtn.classList.add('hidden');
+        }
+    }
+    
+    if (_cachedTasks.length === 0) {
+        showEmptyState('task-list', '📋', '暂无待办事务，一切顺利！');
+        return;
+    }
+    
+    const pointsName = getPointsName();
+    const userName = currentUser ? currentUser.name : '';
+    const isManager = currentUser && ['super_admin', 'admin', 'director'].includes(currentUser.role);
+    
+    container.innerHTML = _cachedTasks.map(t => {
+        const statusInfo = getTaskStatusInfo(t.status);
+        const isCreator = t.creator === userName;
+        const isAssignee = t.assignee === userName;
+        
+        let actionButtons = '';
+        
+        if(t.status === 'open') {
+            actionButtons = `<button onclick="claimTask(${t.id}, event)" class="btn-claim">领取任务</button>`;
+        } else if(t.status === 'claimed') {
+            if(isAssignee) {
+                actionButtons = `
+                    <button onclick="submitTaskComplete(${t.id}, event)" class="btn-submit">提交完成</button>
+                    <button onclick="unclaimTask(${t.id}, event)" class="btn-unclaim" style="margin-left:8px;">撤销领取</button>
+                `;
+                if(isManager) {
+                    actionButtons += `<button onclick="forceApproveTask(${t.id}, event)" class="btn-approve" style="margin-left:8px;">直接验收</button>`;
+                }
+            } else if(isManager) {
+                actionButtons = `
+                    <button onclick="forceApproveTask(${t.id}, event)" class="btn-approve">直接验收</button>
+                    <button onclick="unclaimTask(${t.id}, event)" class="btn-unclaim" style="margin-left:8px;">撤销领取</button>
+                `;
+            }
+        } else if(t.status === 'submitted' && (isCreator || isManager)) {
+            actionButtons = `
+                <button onclick="approveTask(${t.id}, event)" class="btn-approve">通过</button>
+                <button onclick="rejectTask(${t.id}, event)" class="btn-reject">退回</button>
+            `;
+        }
+        
+        let deleteBtn = '';
+        if(isManager || (isCreator && t.status !== 'completed')) {
+            deleteBtn = `<button onclick="deleteTask(${t.id}, event)" class="btn-delete" style="margin-left:10px;">删除</button>`;
+        }
+        
+        let editBtn = '';
+        if(isManager) {
+            editBtn = `<button onclick="openTaskModal(${t.id})" class="btn-edit" style="margin-left:10px; background:#2196F3;">编辑</button>`;
+        }
+        
+        return `
+        <div class="card task-item">
+            <h4>${escapeHtml(t.title)} <span class="task-status ${statusInfo.className}">${statusInfo.label}</span></h4>
+            <div class="markdown-content">${renderMarkdown(t.description || '')}</div>
+            <div class="task-meta">
+                <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
+                    <small>
+                        奖励: <span class="task-reward">${t.reward}</span> ${pointsName}
+                        ${t.creator ? `&nbsp;|&nbsp;发布者: ${getSmartDisplayName(t.creator_id, t.creator)}` : ''}
+                        ${t.assignee ? `&nbsp;|&nbsp;领取者: ${getSmartDisplayName(t.assignee_id, t.assignee)}` : ''}
+                    </small>
+                </div>
+                <div style="margin-left:auto; display:flex; align-items:center;">
+                    ${actionButtons}
+                    ${editBtn}
+                    ${deleteBtn}
+                </div>
+            </div>
+        </div>
+        `;
+    }).join('');
 }
 
 function getTaskStatusInfo(status) {
@@ -2662,44 +2778,81 @@ async function deleteTask(taskId, event) {
 // 活动管理模块
 // ============================================================================
 let _cachedActivities = [];
+let _activityPage = 1;         // 分页：当前页码
+let _activityHasMore = true;   // 分页：是否还有下一页
 let editingActivityId = null;
 
 /**
- * 获取活动列表并渲染
- * 显示活动状态、编辑/删除按钮
+ * 获取活动列表（支持分页）
+ * @param {boolean} isLoadMore - 是否为加载更多
  */
-async function fetchActivities() {
-    // 确保成员缓存已加载（用于活动详情中显示发布者名称）
+async function fetchActivities(isLoadMore = false) {
     await ensureMembersCached();
     
-    const container = document.getElementById('activity-list');
-    showLoading('activity-list');
+    if (!isLoadMore) {
+        _activityPage = 1;
+        _activityHasMore = true;
+        _cachedActivities = [];
+        showLoading('activity-list');
+    }
+    
+    if (isLoadMore && !_activityHasMore) return;
     
     try {
-        const res = await fetch(`${API_BASE}/activities`);
-        _cachedActivities = await res.json();
+        const limit = 10;
+        const res = await fetch(`${API_BASE}/activities?page=${_activityPage}&limit=${limit}`);
+        const items = await res.json();
         
-        if(_cachedActivities.length === 0) {
-            showEmptyState('activity-list', '📅', '暂无活动，快来发起一个吧！', '发起活动', 'openActivityModal()');
-            return;
+        if (items.length < limit) _activityHasMore = false;
+        else _activityPage++;
+        
+        if (isLoadMore) {
+            _cachedActivities = [..._cachedActivities, ...items];
+        } else {
+            _cachedActivities = items;
         }
-
-        container.innerHTML = _cachedActivities.map(a => `
-            <div class="card" onclick="openActivityDetailView(${a.id})" style="cursor:pointer; margin-bottom:20px; transition:all 0.2s;">
-                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
-                     <h3 style="margin:0; font-size:1.2rem; line-height:1.4; flex:1; padding-right:12px;">${escapeHtml(a.title)}</h3>
-                     <span class="points-badge" style="${getStatusStyle(a.status)}; margin-top:2px; float:none; flex-shrink:0; white-space:nowrap;">${a.status}</span>
-                </div>
-                <div style="color:#444; margin-bottom:15px; line-height:1.6; max-height:4.8em; overflow:hidden; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical;">
-                    ${escapeHtml(a.desc || '')}
-                </div>
-                <div style="font-size:0.9em; color:#999; border-top:1px solid #eee; padding-top:10px; display:flex; justify-content:space-between; align-items:center;">
-                    <span style="flex-shrink:0; margin-right:10px;">${formatDate(a.date)}</span>
-                    <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right;">${escapeHtml(a.location || '线上')}</span>
-                </div>
-            </div>
-        `).join('');
+        
+        renderActivities();
     } catch(e) { console.error(e); }
+}
+
+function loadMoreActivities() {
+    fetchActivities(true);
+}
+
+function renderActivities() {
+    const container = document.getElementById('activity-list');
+    
+    // 管理"加载更多"按钮
+    let loadMoreBtn = document.getElementById('activity-load-more');
+    if (loadMoreBtn) {
+        if (_activityHasMore) {
+            loadMoreBtn.classList.remove('hidden');
+        } else {
+            loadMoreBtn.classList.add('hidden');
+        }
+    }
+    
+    if (_cachedActivities.length === 0) {
+        showEmptyState('activity-list', '📅', '暂无活动，快来发起一个吧！', '发起活动', 'openActivityModal()');
+        return;
+    }
+
+    container.innerHTML = _cachedActivities.map(a => `
+        <div class="card" onclick="openActivityDetailView(${a.id})" style="cursor:pointer; margin-bottom:20px; transition:all 0.2s;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+                 <h3 style="margin:0; font-size:1.2rem; line-height:1.4; flex:1; padding-right:12px;">${escapeHtml(a.title)}</h3>
+                 <span class="points-badge" style="${getStatusStyle(a.status)}; margin-top:2px; float:none; flex-shrink:0; white-space:nowrap;">${a.status}</span>
+            </div>
+            <div style="color:#444; margin-bottom:15px; line-height:1.6; max-height:4.8em; overflow:hidden; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical;">
+                ${escapeHtml(a.desc || '')}
+            </div>
+            <div style="font-size:0.9em; color:#999; border-top:1px solid #eee; padding-top:10px; display:flex; justify-content:space-between; align-items:center;">
+                <span style="flex-shrink:0; margin-right:10px;">${formatDate(a.date)}</span>
+                <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right;">${escapeHtml(a.location || '线上')}</span>
+            </div>
+        </div>
+    `).join('');
 }
 
 function getPoemTypeStyle(type) {
@@ -2889,8 +3042,9 @@ function openFinanceModal(id = null) {
         document.getElementById('f-amount').value = record.amount;
         document.getElementById('f-summary').value = record.summary || '';
         document.getElementById('f-handler').value = record.handler || '';
+        document.getElementById('f-date').value = record.date || '';
     } else {
-        // 新建模式：清空表单
+        // 新建模式：清空表单，日期默认今天
         editingFinanceId = null;
         document.querySelector('#modal-finance h3').innerText = '财务记账';
         document.getElementById('f-type').value = 'income';
@@ -2898,6 +3052,7 @@ function openFinanceModal(id = null) {
         document.getElementById('f-amount').value = '';
         document.getElementById('f-summary').value = '';
         document.getElementById('f-handler').value = '';
+        document.getElementById('f-date').value = new Date().toISOString().split('T')[0];
     }
     toggleModal('modal-finance');
 }
@@ -2914,11 +3069,12 @@ async function submitFinance() {
             category: document.getElementById('f-category').value,
             amount: parseFloat(document.getElementById('f-amount').value),
             summary: document.getElementById('f-summary').value,
-            handler: document.getElementById('f-handler').value
+            handler: document.getElementById('f-handler').value,
+            date: document.getElementById('f-date').value
         };
 
-        if (isNaN(data.amount) || !data.summary || !data.handler) {
-            alert('金额、摘要和经办人为必填项');
+        if (isNaN(data.amount) || !data.summary || !data.handler || !data.date) {
+            alert('金额、摘要、经办人和记账日期为必填项');
             return;
         }
 
@@ -2927,12 +3083,6 @@ async function submitFinance() {
         if (editingFinanceId) {
             url = `${API_BASE}/finance/update`;
             data.id = editingFinanceId;
-            // 编辑模式：保留原始日期
-            const original = _cachedFinance.find(r => r.id === editingFinanceId);
-            data.date = original ? original.date : new Date().toISOString().split('T')[0];
-        } else {
-            // 新建模式：使用当天日期
-            data.date = new Date().toISOString().split('T')[0];
         }
 
         const response = await fetchWithAuth(url, {

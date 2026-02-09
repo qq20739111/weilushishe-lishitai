@@ -1129,6 +1129,14 @@ def update_poem(request):
     if not data.get('title') or not data.get('content'):
         return Response('{"error": "诗名和正文为必填项"}', 400, {'Content-Type': 'application/json'})
     
+    # 权限检查：作者本人或管理员及以上
+    user_id, role = get_operator_role(request)
+    poem = db_poems.get_by_id(pid)
+    if not poem:
+        return Response('{"error": "作品不存在"}', 404, {'Content-Type': 'application/json'})
+    if poem.get('author_id') != user_id and role not in ROLE_ADMIN:
+        return Response('{"error": "只能编辑自己的作品"}', 403, {'Content-Type': 'application/json'})
+    
     def updater(record):
         if 'title' in data: record['title'] = data['title']
         if 'content' in data: record['content'] = data['content']
@@ -1144,6 +1152,15 @@ def update_poem(request):
 def delete_poem(request):
     if not request.json: return Response('Invalid', 400)
     pid = request.json.get('id')
+    
+    # 权限检查：作者本人或管理员及以上
+    user_id, role = get_operator_role(request)
+    poem = db_poems.get_by_id(pid)
+    if not poem:
+        return Response('{"error": "作品不存在"}', 404, {'Content-Type': 'application/json'})
+    if poem.get('author_id') != user_id and role not in ROLE_ADMIN:
+        return Response('{"error": "只能删除自己的作品"}', 403, {'Content-Type': 'application/json'})
+    
     if db_poems.delete(pid):
         return {"status": "success"}
     return Response("Poem not found", 404)
@@ -1153,7 +1170,7 @@ def delete_poem(request):
 def list_activities(request):
     try:
         page = int(request.args.get('page', 1))
-        limit = int(request.args.get('limit', 50))
+        limit = int(request.args.get('limit', 10))
         q = request.args.get('q', None)
         if q: q = simple_unquote(q)
         items, _ = db_activities.fetch_page(page, limit, reverse=True, search_term=q)
@@ -1207,19 +1224,13 @@ def delete_activity(request):
 def list_tasks(request):
     """获取任务列表，支持分页和搜索"""
     try:
-        page = int(request.args.get('page', 0))
-        limit = int(request.args.get('limit', 0))
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 10))
         q = request.args.get('q', None)
         if q:
             q = simple_unquote(q)
-        
-        # 如果提供了分页参数，使用分页查询
-        if page > 0 and limit > 0:
-            items, total = db_tasks.fetch_page(page, limit, reverse=True, search_term=q)
-            return {"data": items, "total": total, "page": page, "limit": limit}
-        else:
-            # 向后兼容：不带分页参数时返回全部数据
-            return db_tasks.get_all()
+        items, _ = db_tasks.fetch_page(page, limit, reverse=True, search_term=q)
+        return items
     except Exception as e:
         error(f"获取任务列表失败: {e}", "API")
         return []
@@ -1459,6 +1470,7 @@ def delete_task(request):
 def list_members(request):
     """获取成员列表，支持分页和搜索
     参数 public=1 时返回公开信息（雅号、围炉值），用于未登录访问
+    非公开模式需要登录，且不返回password字段
     """
     try:
         page = int(request.args.get('page', 0))
@@ -1468,19 +1480,27 @@ def list_members(request):
         if q:
             q = simple_unquote(q)
         
-        # 如果提供了分页参数，使用分页查询
+        # 非公开模式需要登录
+        if not public_mode:
+            ok, _, err = check_login(request)
+            if not ok:
+                return err
+        
         if page > 0 and limit > 0:
             items, total = db_members.fetch_page(page, limit, reverse=False, search_term=q)
             if public_mode:
-                # 公开模式：只返回雅号和围炉值
                 items = [{'id': m.get('id'), 'alias': m.get('alias', ''), 'points': m.get('points', 0)} for m in items]
-            return {"data": items, "total": total, "page": page, "limit": limit}
+            else:
+                for m in items:
+                    m.pop('password', None)
+            return items
         else:
-            # 向后兼容：不带分页参数时返回全部数据
+            # 不带分页参数时返回全部数据（用于成员名称缓存）
             members = db_members.get_all()
             if public_mode:
-                # 公开模式：只返回雅号和围炉值
                 return [{'id': m.get('id'), 'alias': m.get('alias', ''), 'points': m.get('points', 0)} for m in members]
+            for m in members:
+                m.pop('password', None)
             return members
     except Exception as e:
         error(f"获取成员列表失败: {e}", "API")
@@ -1671,19 +1691,21 @@ def update_member_route(request):
 
 @api_route('/api/members/change_password', methods=['POST'])
 def change_password_route(request):
-    """用户修改自己的密码（需要登录）"""
+    """用户修改自己的密码（需要登录，只能改自己的）"""
     # 登录验证
     ok, user_id, err = check_login(request)
     if not ok:
         return err
     
     data = request.json
-    member_id = data.get('id')
     old_password = data.get('old_password', '')
     new_password = data.get('new_password', '')
     
-    if not member_id or not old_password or not new_password:
+    if not old_password or not new_password:
         return Response('{"error": "原密码和新密码为必填项"}', 400, {'Content-Type': 'application/json'})
+    
+    # 强制使用Token中的user_id，忽略请求体中的id，防止篡改他人密码
+    member_id = user_id
     
     # 新密码强度验证
     valid, err = validate_password_strength(new_password)
@@ -1878,12 +1900,157 @@ def update_profile(request):
     return Response('{"error": "更新失败"}', 500, {'Content-Type': 'application/json'})
 
 # --- Finance API ---
+
+def _get_last_balance():
+    """获取当前余额（最后一条记录的balance_after，或全量计算回退）"""
+    last_line = ''
+    try:
+        with open('data/finance.jsonl', 'r') as f:
+            for line in f:
+                if line.strip():
+                    last_line = line.strip()
+    except:
+        return 0
+    if not last_line:
+        return 0
+    try:
+        ba = json.loads(last_line).get('balance_after')
+        if ba is not None:
+            return ba
+    except:
+        pass
+    # 回退：全量计算（兼容无balance_after的旧数据）
+    balance = 0
+    try:
+        with open('data/finance.jsonl', 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                    if r.get('type') == 'income':
+                        balance += r.get('amount', 0)
+                    else:
+                        balance -= r.get('amount', 0)
+                except:
+                    pass
+    except:
+        pass
+    return balance
+
+def _rewrite_finance_file(update_id=None, update_data=None, delete_id=None):
+    """流式重写财务文件并重算所有balance_after
+    update_id + update_data: 更新指定记录
+    delete_id: 删除指定记录
+    返回: True=成功, False=未找到目标记录
+    """
+    import os
+    balance = 0
+    found = False
+    need_target = (update_id is not None) or (delete_id is not None)
+    tmp = 'data/finance.jsonl.tmp'
+    try:
+        with open('data/finance.jsonl', 'r') as fin, open(tmp, 'w') as fout:
+            for line in fin:
+                line_s = line.strip()
+                if not line_s:
+                    continue
+                try:
+                    r = json.loads(line_s)
+                except:
+                    continue
+                rid = r.get('id')
+                # 删除：跳过目标记录
+                if delete_id is not None and rid == delete_id:
+                    found = True
+                    continue
+                # 更新：修改目标记录字段
+                if update_id is not None and rid == update_id:
+                    for k in ['amount', 'summary', 'date', 'type', 'category', 'handler']:
+                        if update_data and k in update_data:
+                            r[k] = update_data[k]
+                    found = True
+                # 重算余额
+                if r.get('type') == 'income':
+                    balance += r.get('amount', 0)
+                else:
+                    balance -= r.get('amount', 0)
+                r['balance_after'] = balance
+                fout.write(json.dumps(r) + '\n')
+        if not need_target or found:
+            os.remove('data/finance.jsonl')
+            os.rename(tmp, 'data/finance.jsonl')
+        else:
+            os.remove(tmp)
+        gc.collect()
+        return found if need_target else True
+    except Exception as e:
+        error(f"重写财务文件失败: {e}", "DB")
+        try:
+            os.remove(tmp)
+        except:
+            pass
+        return False
+
 @api_route('/api/finance', methods=['GET'])
 @require_login
 def list_finance(request):
-    """获取财务记录列表（需要登录）"""
-    items, _ = db_finance.fetch_page(1, 100, reverse=True)
-    return items
+    """获取财务记录列表（需要登录），支持分页"""
+    try:
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 20))
+        items, _ = db_finance.fetch_page(page, limit, reverse=True)
+        return items
+    except Exception as e:
+        error(f"获取财务记录列表失败: {e}", "API")
+        return []
+
+@api_route('/api/finance/stats', methods=['GET'])
+@require_login
+def finance_stats(request):
+    """获取财务统计：本年度收支 + 全时段累计余额
+    单次文件扫描，年份预过滤减少JSON解析，最后一行获取余额
+    """
+    year_str = str(time.localtime()[0])
+    year_income = 0
+    year_expense = 0
+    last_line = ''
+    try:
+        with open('data/finance.jsonl', 'r') as f:
+            for line in f:
+                line_s = line.strip()
+                if not line_s:
+                    continue
+                last_line = line_s
+                # 年份预过滤：行中不含年份字符串则跳过JSON解析
+                if year_str not in line_s:
+                    continue
+                try:
+                    r = json.loads(line_s)
+                    if r.get('date', '').startswith(year_str):
+                        if r.get('type') == 'income':
+                            year_income += r.get('amount', 0)
+                        else:
+                            year_expense += r.get('amount', 0)
+                except:
+                    pass
+        gc.collect()
+    except:
+        pass
+    # 从最后一条记录获取累计余额
+    balance = 0
+    if last_line:
+        try:
+            ba = json.loads(last_line).get('balance_after')
+            if ba is not None:
+                balance = ba
+            else:
+                # 兼容无balance_after的旧数据：全量计算
+                balance = _get_last_balance()
+        except:
+            balance = _get_last_balance()
+    return {"year_income": year_income, "year_expense": year_expense, "balance": balance, "year": int(year_str)}
 
 @api_route('/api/finance', methods=['POST'])
 @require_permission(ROLE_FINANCE)
@@ -1892,55 +2059,55 @@ def add_finance(request):
     
     # 必填项验证
     amount = data.get('amount')
-    if amount is None or not data.get('summary') or not data.get('handler'):
-        return Response('{"error": "金额、摘要和经办人为必填项"}', 400, {'Content-Type': 'application/json'})
+    if amount is None or not data.get('summary') or not data.get('handler') or not data.get('date'):
+        return Response('{"error": "金额、摘要、经办人和记账日期为必填项"}', 400, {'Content-Type': 'application/json'})
     
     data['id'] = db_finance.get_max_id() + 1
+    # 计算并存储操作后余额
+    last_balance = _get_last_balance()
+    if data.get('type') == 'income':
+        data['balance_after'] = last_balance + data['amount']
+    else:
+        data['balance_after'] = last_balance - data['amount']
     db_finance.append(data)
     return data
 
 @api_route('/api/finance/update', methods=['POST'])
 @require_permission(ROLE_SUPER_ADMIN)
 def update_finance(request):
-    """更新财务记录"""
+    """更新财务记录并重算所有balance_after"""
     data = request.json
     if not data or 'id' not in data:
         return Response('{"error": "缺少记录ID"}', 400, {'Content-Type': 'application/json'})
     
     # 必填项验证
     amount = data.get('amount')
-    if amount is None or not data.get('summary') or not data.get('handler'):
-        return Response('{"error": "金额、摘要和经办人为必填项"}', 400, {'Content-Type': 'application/json'})
+    if amount is None or not data.get('summary') or not data.get('handler') or not data.get('date'):
+        return Response('{"error": "金额、摘要、经办人和记账日期为必填项"}', 400, {'Content-Type': 'application/json'})
     
     fid = data.get('id')
-    
-    def updater(record):
-        for k in ['amount', 'summary', 'date', 'type', 'category', 'handler']:
-            if k in data:
-                record[k] = data[k]
-    
-    if db_finance.update(fid, updater):
+    if _rewrite_finance_file(update_id=fid, update_data=data):
         return {"status": "success"}
     return Response('{"error": "记录不存在"}', 404, {'Content-Type': 'application/json'})
 
 @api_route('/api/finance/delete', methods=['POST'])
 @require_permission(ROLE_SUPER_ADMIN)
 def delete_finance(request):
-    """删除财务记录"""
+    """删除财务记录并重算所有balance_after"""
     data = request.json
     if not data or 'id' not in data:
         return Response('{"error": "缺少记录ID"}', 400, {'Content-Type': 'application/json'})
     
     fid = data.get('id')
-    if db_finance.delete(fid):
+    if _rewrite_finance_file(delete_id=fid):
         return {"status": "success"}
     return Response('{"error": "记录不存在"}', 404, {'Content-Type': 'application/json'})
 
 # --- Login Logs API ---
 @api_route('/api/login_logs', methods=['GET'])
-@require_login
+@require_permission(ROLE_DIRECTOR)
 def list_login_logs(request):
-    """获取登录日志（需要登录）"""
+    """获取登录日志（理事及以上权限）"""
     items, _ = db_login_logs.fetch_page(1, 20, reverse=True)
     return items
 
@@ -2604,7 +2771,10 @@ def _get_guest_name(guest_id):
 
 @api_route('/api/chat/messages', methods=['GET'])
 def chat_get_messages(request):
-    """获取聊天消息（支持增量获取）"""
+    """获取聊天消息（支持增量获取，需聊天室开启）"""
+    s = get_settings()
+    if not s.get('chat_enabled', True):
+        return Response('{"error": "龙门阵已关闭"}', 403, {'Content-Type': 'application/json'})
     try:
         after_id = int(request.args.get('after', 0))
         # 返回指定ID之后的消息
@@ -2619,7 +2789,10 @@ def chat_get_messages(request):
 
 @api_route('/api/chat/users', methods=['GET'])
 def chat_get_users(request):
-    """获取当前在线用户列表"""
+    """获取当前在线用户列表（需聊天室开启）"""
+    s = get_settings()
+    if not s.get('chat_enabled', True):
+        return Response('{"error": "龙门阵已关闭"}', 403, {'Content-Type': 'application/json'})
     now = int(time.time())
     # 合并登录用户和游客（过滤过期游客）
     users = []
@@ -2753,29 +2926,34 @@ def chat_send_message(request):
 
 @api_route('/api/chat/leave', methods=['POST'])
 def chat_leave(request):
-    """离开聊天室"""
+    """离开聊天室（登录用户以Token为准，游客需验证身份）"""
     global _chat_users, _chat_guests
     
-    data = request.json or {}
-    user_id = data.get('user_id')
-    
-    # 也检查Token
+    # 优先使用Token鉴权
     token_user_id, _ = get_operator_role(request)
     if token_user_id:
-        user_id = token_user_id
+        # 登录用户：以Token身份为准，只能让自己离开
+        if token_user_id in _chat_users:
+            del _chat_users[token_user_id]
+        return {'status': 'success'}
     
-    if user_id in _chat_users:
-        del _chat_users[user_id]
-    if user_id in _chat_guests:
+    # 游客：只允许负数ID，且必须在游客列表中
+    data = request.json or {}
+    user_id = data.get('user_id')
+    if user_id and user_id < 0 and user_id in _chat_guests:
         del _chat_guests[user_id]
+        return {'status': 'success'}
     
     return {'status': 'success'}
 
 @api_route('/api/chat/status', methods=['GET'])
 def chat_status(request):
-    """获取聊天室状态（内存使用、用户数等）"""
+    """获取聊天室状态（内存使用、用户数等，需聊天室开启）"""
     now = int(time.time())
     s = get_settings()
+    chat_enabled = s.get('chat_enabled', True)
+    if not chat_enabled:
+        return {'chat_enabled': False}
     # 计算未过期的游客数量
     active_guests = sum(1 for info in _chat_guests.values() if info.get('expire', 0) >= now)
     max_users = s.get('chat_max_users', 20)
