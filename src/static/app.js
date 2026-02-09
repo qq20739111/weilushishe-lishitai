@@ -1238,7 +1238,7 @@ function loadMorePoems() {
 
 function renderPoems() {
     const container = document.getElementById('poem-list');
-    const isManager = currentUser && ['super_admin', 'admin', 'director'].includes(currentUser.role);
+    const isPoemAdmin = currentUser && ['super_admin', 'admin'].includes(currentUser.role);
     
     // Default Server Sort is assumed correct (Newest First).
     // But we might want to re-sort if we mixed in drafts?
@@ -1278,8 +1278,8 @@ function renderPoems() {
 
     // Render
     container.innerHTML = displayList.map(p => {
-        const isAuthor = currentUser && (p.author === currentUser.name || p.author === currentUser.alias);
-        const canManage = isManager || p.isLocal || isAuthor;
+        const isAuthor = currentUser && (p.author_id === currentUser.id || p.author === currentUser.name || p.author === currentUser.alias);
+        const canManage = isPoemAdmin || p.isLocal || isAuthor;
         
         // Generate ID string for function calls
         const idParam = typeof p.id === 'string' ? `'${p.id}'` : p.id;
@@ -1585,7 +1585,9 @@ let _cachedMembers = [];
 async function ensureMembersCached() {
     if (_cachedMembers.length === 0) {
         try {
-            const res = await fetch(`${API_BASE}/members`);
+            const res = currentUser
+                ? await fetchWithAuth(`${API_BASE}/members`)
+                : await fetch(`${API_BASE}/members?public=1`);
             if (res.ok) _cachedMembers = await res.json();
         } catch (e) {
             console.warn('加载成员缓存失败:', e);
@@ -1718,7 +1720,7 @@ async function fetchMembers(isLoadMore = false) {
         let url = `${API_BASE}/members?page=${_memberPage}&limit=${limit}`;
         if (!isLoggedIn) url += '&public=1';
         
-        const res = await fetch(url);
+        const res = isLoggedIn ? await fetchWithAuth(url) : await fetch(url);
         if (!res.ok) throw new Error('Failed to fetch members');
         const items = await res.json();
         
@@ -4569,6 +4571,7 @@ let _chatLastMsgId = 0;         // 最后一条消息ID（用于增量获取）
 let _chatPollingTimer = null;   // 轮询定时器
 let _chatJoined = false;        // 是否已加入聊天室
 let _chatInputBound = false;    // 输入框事件是否已绑定（防止重复绑定）
+let _chatSending = false;       // 是否正在发送消息（防止重复提交）
 let _homeChatTimer = null;      // 首页聊天刷新定时器
 let _homeChatLastMsgId = 0;     // 首页聊天最后消息ID
 let _homeChatMessages = [];     // 首页聊天消息缓存
@@ -4989,8 +4992,13 @@ async function sendChatMessage() {
     const content = input.value.trim();
     if (!content) return;
     
+    // 防止重复提交
+    if (_chatSending) return;
+    _chatSending = true;
+    
     if (content.length > CHAT_MAX_CHARS) {
         alert(`消息过长，最多${CHAT_MAX_CHARS}个字符`);
+        _chatSending = false;
         return;
     }
     
@@ -5032,6 +5040,7 @@ async function sendChatMessage() {
         alert('发送失败，请重试');
     }
     // 更新按钮状态（清空后会自动禁用）
+    _chatSending = false;
     updateChatSendBtn();
 }
 
@@ -5197,8 +5206,13 @@ async function sendHomeChatMessage() {
     const content = input.value.trim();
     if (!content) return;
     
+    // 防止重复提交
+    if (_chatSending) return;
+    _chatSending = true;
+    
     if (content.length > CHAT_MAX_CHARS) {
         alert(`消息过长，最多${CHAT_MAX_CHARS}个字符`);
+        _chatSending = false;
         return;
     }
     
@@ -5239,5 +5253,6 @@ async function sendHomeChatMessage() {
         alert('发送失败，请重试');
     }
     // 更新按钮状态（清空后会自动禁用）
+    _chatSending = false;
     updateHomeChatSendBtn();
 }
