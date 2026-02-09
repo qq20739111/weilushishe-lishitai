@@ -1055,6 +1055,11 @@ function showSection(id) {
         const shouldShow = visibleSections.includes(id) && (currentUser || guestAllowedSections.includes(id));
         searchContainer.classList.toggle('hidden', !shouldShow);
     }
+    // 热力图仅在首页可见
+    const heatmapContainer = document.getElementById('weekly-heatmap-container');
+    if (heatmapContainer) {
+        heatmapContainer.classList.toggle('hidden', id !== 'home');
+    }
     
     // Auto-fetch data based on section
     if(id === 'poems') fetchPoems();
@@ -1068,6 +1073,7 @@ function showSection(id) {
         // 首页也加载聊天预览（需要先检查chat_enabled设置）
         if(id === 'home') {
             checkChatEnabledAndLoad();
+            loadWeeklyHeatmap();
         } else {
             stopHomeChatPolling();   // 离开首页时停止
         }
@@ -3218,6 +3224,74 @@ async function deleteActivityInView(id, event) {
     await deleteActivity(id, event); // deleteActivity has its own confirm
 }
 
+/* ============================================================================
+   年度诗词周报热力图
+   ============================================================================ */
+
+let _heatmapYearInited = false;
+
+async function loadWeeklyHeatmap() {
+    const sel = document.getElementById('heatmap-year-select');
+    const year = sel && sel.value ? sel.value : new Date().getFullYear();
+    try {
+        const res = await fetch(`${API_BASE}/poems/weekly-stats?year=${year}`);
+        if (!res.ok) throw new Error('请求失败');
+        const data = await res.json();
+        renderWeeklyHeatmap(data);
+    } catch (e) {
+        console.error('热力图加载失败:', e);
+        const grid = document.getElementById('weekly-heatmap');
+        if (grid) grid.innerHTML = '<div class="empty-hint">加载失败</div>';
+    }
+}
+
+function renderWeeklyHeatmap(data) {
+    const sel = document.getElementById('heatmap-year-select');
+    if (!_heatmapYearInited && sel) {
+        const cur = new Date().getFullYear();
+        sel.innerHTML = '';
+        for (let y = cur; y >= cur - 4; y--) {
+            const opt = document.createElement('option');
+            opt.value = y;
+            opt.textContent = y + '年';
+            sel.appendChild(opt);
+        }
+        sel.value = data.year;
+        _heatmapYearInited = true;
+    }
+
+    const actSet = new Set(data.act_weeks || []);
+    const grid = document.getElementById('weekly-heatmap');
+    if (!grid) return;
+
+    const cells = [];
+    for (let i = 0; i < 52; i++) {
+        const count = data.weeks[i] || 0;
+        const isAct = actSet.has(i);
+        let cls, tip;
+        if (isAct) {
+            cls = 'activity';
+            tip = '第' + (i + 1) + '周: ' + count + '篇诗词 【活动周】';
+        } else {
+            let lvl = 0;
+            if (count >= 11) lvl = 4;
+            else if (count >= 6) lvl = 3;
+            else if (count >= 3) lvl = 2;
+            else if (count >= 1) lvl = 1;
+            cls = 'level-' + lvl;
+            tip = '第' + (i + 1) + '周: ' + count + '篇诗词';
+        }
+        cells.push('<div class="week-cell ' + cls + '" data-tooltip="' + tip + '"></div>');
+    }
+    grid.innerHTML = cells.join('');
+    // 移动端点击显示周信息
+    grid.onclick = function(e) {
+        const cell = e.target.closest('.week-cell');
+        const info = document.getElementById('heatmap-info');
+        if (info) info.textContent = cell ? (cell.getAttribute('data-tooltip') || '') : '';
+    };
+}
+
 async function loadSystemInfo() {
     // 确保成员缓存已加载（用于首页显示诗作作者）
     await ensureMembersCached();
@@ -3506,6 +3580,9 @@ async function handleGlobalSearch(term) {
     // Switch to search results section immediately
     document.querySelectorAll('main > section').forEach(el => el.classList.add('hidden'));
     document.getElementById('search-results-section').classList.remove('hidden');
+    // 隐藏首页专用的热力图
+    const hmc = document.getElementById('weekly-heatmap-container');
+    if (hmc) hmc.classList.add('hidden');
     
     // Optimistic UI for immediate feedback
     const resultsContainer = document.getElementById('search-results-container');

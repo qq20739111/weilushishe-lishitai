@@ -59,6 +59,28 @@
             <input type="text" id="global-search-input" placeholder="搜索 活动 / 藏诗阁 / 事务 ..." style="width: 100%; padding: 12px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
         </div>
 
+        <!-- 年度诗词周报热力图 -->
+        <div class="weekly-heatmap-container" id="weekly-heatmap-container">
+            <div class="heatmap-header">
+                <h4 class="heatmap-title">年度热力图</h4>
+                <select id="heatmap-year-select" onchange="loadWeeklyHeatmap()"></select>
+            </div>
+            <div class="heatmap-grid" id="weekly-heatmap"></div>
+            <div class="heatmap-info" id="heatmap-info"></div>
+            <div class="heatmap-legend">
+                <span class="legend-label">少</span>
+                <span class="legend-box level-0"></span>
+                <span class="legend-box level-1"></span>
+                <span class="legend-box level-2"></span>
+                <span class="legend-box level-3"></span>
+                <span class="legend-box level-4"></span>
+                <span class="legend-label">多</span>
+                <span class="legend-divider"></span>
+                <span class="legend-box activity"></span>
+                <span class="legend-label">活动周</span>
+            </div>
+        </div>
+
         <!-- Search Results Section (Hidden by default) -->
         <section id="search-results-section" class="hidden">
             <h3>搜索结果</h3>

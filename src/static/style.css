@@ -2387,3 +2387,192 @@ button:disabled {
         transform: translateY(0);
     }
 }
+
+/* ============================================================================
+   年度诗词周报热力图
+   ============================================================================ */
+
+.weekly-heatmap-container {
+    background: var(--card-bg);
+    padding: 20px;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+    margin-bottom: 25px;
+}
+
+.heatmap-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.heatmap-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--primary);
+    margin: 0;
+}
+
+#heatmap-year-select {
+    width: auto;
+    margin: 0;
+    padding: 4px 24px 4px 10px;
+    font-size: 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background-color: #fff;
+    cursor: pointer;
+    color: var(--text);
+}
+
+.heatmap-grid {
+    display: grid;
+    grid-template-columns: repeat(52, 1fr);
+    gap: 3px;
+    padding: 8px 0;
+}
+
+.heatmap-grid > .empty-hint {
+    grid-column: 1 / -1;
+}
+
+.week-cell {
+    aspect-ratio: 1 / 1;
+    border-radius: 3px;
+    cursor: default;
+    transition: transform 0.15s, box-shadow 0.15s;
+    position: relative;
+}
+
+.week-cell:hover {
+    transform: scale(1.3);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    z-index: 10;
+}
+
+.week-cell.level-0 { background: #e9ecef; }
+.week-cell.level-1 { background: #b2d8d8; }
+.week-cell.level-2 { background: #66b2b2; }
+.week-cell.level-3 { background: #008080; }
+.week-cell.level-4 { background: #005555; }
+.week-cell.activity { background: #e6a817; }
+
+/* Tooltip */
+.week-cell::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.85);
+    color: #fff;
+    padding: 5px 10px;
+    border-radius: 5px;
+    font-size: 0.75rem;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s;
+    z-index: 1000;
+}
+
+.week-cell:hover::after {
+    opacity: 1;
+}
+
+.heatmap-info {
+    display: none;
+}
+
+/* 图例 */
+.heatmap-legend {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 4px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    flex-wrap: wrap;
+}
+
+.legend-label {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin: 0 2px;
+}
+
+.legend-box {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    display: inline-block;
+}
+
+.legend-box.level-0 { background: #e9ecef; }
+.legend-box.level-1 { background: #b2d8d8; }
+.legend-box.level-2 { background: #66b2b2; }
+.legend-box.level-3 { background: #008080; }
+.legend-box.level-4 { background: #005555; }
+.legend-box.activity { background: #e6a817; }
+
+.legend-divider {
+    width: 1px;
+    height: 14px;
+    background: var(--border);
+    margin: 0 8px;
+}
+
+/* 移动端 */
+@media (max-width: 767px) {
+    .weekly-heatmap-container {
+        padding: 15px;
+    }
+
+    .heatmap-grid {
+        grid-template-columns: repeat(52, 10px);
+        gap: 2px;
+        min-width: 0;
+        overflow-x: auto;
+    }
+
+    .week-cell {
+        width: 10px;
+        height: 10px;
+    }
+
+    .week-cell::after {
+        display: none;
+    }
+
+    .heatmap-info {
+        display: block;
+        text-align: center;
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        min-height: 1.4em;
+        padding: 6px 0 0;
+    }
+
+    .heatmap-legend {
+        gap: 3px;
+    }
+
+    .legend-label {
+        font-size: 0.72rem;
+    }
+
+    .legend-box {
+        width: 10px;
+        height: 10px;
+    }
+}
+
+/* 平板端 */
+@media (max-width: 1279px) and (min-width: 768px) {
+    .heatmap-grid {
+        grid-template-columns: repeat(52, minmax(8px, 1fr));
+    }
+}

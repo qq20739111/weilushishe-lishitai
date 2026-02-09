@@ -62,6 +62,7 @@ MAINTENANCE_WHITELIST = [
 PUBLIC_DATA_WHITELIST = [
     '/api/poems',
     '/api/poems/random',
+    '/api/poems/weekly-stats',
     '/api/activities',
     '/api/members',
     '/api/chat/messages',
@@ -1097,6 +1098,49 @@ def random_poem(request):
     except Exception as e:
         error(f"获取随机诗歌失败: {e}", "API")
         return {}  # 异常时返回空对象
+
+@api_route('/api/poems/weekly-stats', methods=['GET'])
+def weekly_poem_stats(request):
+    """获取年度诗词周统计（流式计算，内存友好）"""
+    try:
+        year = int(request.args.get('year', time.localtime()[0]))
+        days_in_months = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        if (year % 4 == 0 and year % 100 != 0) or (year % 400 == 0):
+            days_in_months[2] = 29
+        weeks = [0] * 52
+        for poem in db_poems.iter_records():
+            d = poem.get('date', '')
+            if not d or len(d) < 10:
+                continue
+            try:
+                if int(d[:4]) != year:
+                    continue
+                m, dy = int(d[5:7]), int(d[8:10])
+                doy = sum(days_in_months[:m]) + dy
+                w = min((doy - 1) // 7, 51)
+                weeks[w] += 1
+            except:
+                pass
+        act_weeks = []
+        for act in db_activities.iter_records():
+            d = act.get('date', '')
+            if not d or len(d) < 10:
+                continue
+            try:
+                if int(d[:4]) != year:
+                    continue
+                m, dy = int(d[5:7]), int(d[8:10])
+                doy = sum(days_in_months[:m]) + dy
+                w = min((doy - 1) // 7, 51)
+                if w not in act_weeks:
+                    act_weeks.append(w)
+            except:
+                pass
+        gc.collect()
+        return {'year': year, 'weeks': weeks, 'act_weeks': act_weeks}
+    except Exception as e:
+        error(f"获取诗词周统计失败: {e}", "API")
+        return {'year': 0, 'weeks': [0] * 52, 'act_weeks': []}
 
 @api_route('/api/poems', methods=['POST'])
 @require_login
