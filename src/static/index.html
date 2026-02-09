@@ -565,7 +565,7 @@
             
             <div id="poem-list"></div>
             
-            <button id="poem-load-more" class="load-more-btn hidden" onclick="showAllPoems()">查看更多作品</button>
+            <button id="poem-load-more" class="load-more-btn hidden" onclick="loadMorePoems()">查看更多作品</button>
         </section>
 
         <!-- Activities Section -->
@@ -581,7 +581,7 @@
         <section id="finance" class="hidden">
             <div class="header-row">
                 <h2>财务公示</h2>
-                <button onclick="toggleModal('modal-finance')" id="btn-add-finance" class="hidden">记一笔</button>
+                <button onclick="openFinanceModal()" id="btn-add-finance" class="hidden">记一笔</button>
             </div>
             <div class="card finance-stats">
                 <div class="finance-balance">
@@ -600,7 +600,7 @@
                 </div>
             </div>
             <table class="table">
-                <thead><tr><th>日期</th><th>摘要</th><th>金额</th><th>经办</th></tr></thead>
+                <thead><tr><th>日期</th><th>摘要</th><th>金额</th><th>经办</th><th id="finance-op-th" class="hidden">操作</th></tr></thead>
                 <tbody id="finance-list"></tbody>
             </table>
         </section>

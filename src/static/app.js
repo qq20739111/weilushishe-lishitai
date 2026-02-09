@@ -698,12 +698,6 @@ async function checkSystemSettings() {
     return { maintenance_mode: false, allow_guest: true };
 }
 
-// 保留旧函数名以兼容
-async function checkMaintenanceMode() {
-    const settings = await checkSystemSettings();
-    return settings.maintenance_mode === true;
-}
-
 /**
  * 更新导航栏用户显示
  * 优先显示雅号(alias)，没有则显示姓名(name)
@@ -779,21 +773,6 @@ function getAuthHeaders(extraHeaders = {}) {
         headers['Authorization'] = `Bearer ${token}`;
     }
     return headers;
-}
-
-/**
- * 获取带Token的URL查询参数（用于GET请求）
- * @param {object} extraParams - 额外的查询参数
- * @returns {string} 查询字符串（包含?前缀）
- */
-function getAuthQuery(extraParams = {}) {
-    const params = { ...extraParams };
-    const token = getAuthToken();
-    if (token) {
-        params.token = token;
-    }
-    const queryString = new URLSearchParams(params).toString();
-    return queryString ? `?${queryString}` : '';
 }
 
 /**
@@ -1257,11 +1236,6 @@ function loadMorePoems() {
     fetchPoems(true);
 }
 
-function showAllPoems() {
-    // Deprecated in favor of Load More
-    loadMorePoems();
-}
-
 function renderPoems() {
     const container = document.getElementById('poem-list');
     const isManager = currentUser && ['super_admin', 'admin', 'director'].includes(currentUser.role);
@@ -1619,13 +1593,6 @@ async function ensureMembersCached() {
     }
 }
 
-// 根据用户姓名获取显示名称（优先雅号）
-function getDisplayNameByName(name) {
-    if (!name) return '';
-    const member = _cachedMembers.find(m => m.name === name);
-    return member ? (member.alias || member.name) : name;
-}
-
 /**
  * 根据member_id获取显示名称（优先雅号）
  * @param {number} memberId - 成员ID
@@ -1821,6 +1788,7 @@ async function openMemberModal(member = null) {
         document.getElementById('m-phone').value = member.phone || '';
         document.getElementById('m-password').value = ''; // 编辑时不显示原密码 
         document.getElementById('m-points').value = member.points || 0;
+        document.getElementById('m-points').placeholder = `${getPointsName()} (留空则保持不变)`;
         document.getElementById('m-birthday').value = member.birthday || '';
         // 编辑时密码非必填
         document.getElementById('m-password').placeholder = "留空则不修改密码";
@@ -2104,6 +2072,9 @@ async function deleteMember(id, event) {
     }
 }
 
+let _cachedFinance = [];
+let editingFinanceId = null;
+
 async function fetchFinance() {
     // 权限控制：只有财务、管理员、超级管理员可以记账
     const addFinanceBtn = document.getElementById('btn-add-finance');
@@ -2119,6 +2090,7 @@ async function fetchFinance() {
             throw new Error(err.error || '获取失败');
         }
         const records = await res.json();
+        _cachedFinance = records;
         
         let income = 0, expense = 0;
         records.forEach(r => {
@@ -2130,6 +2102,9 @@ async function fetchFinance() {
         document.getElementById('total-expense').innerText = expense.toLocaleString();
         document.getElementById('balance').innerText = (income - expense).toLocaleString();
         
+        // 编辑/删除权限：仅超级管理员
+        const canEditFinance = currentUser && currentUser.role === 'super_admin';
+        
         const tbody = document.getElementById('finance-list');
         tbody.innerHTML = records.map(r => `
         <tr>
@@ -2139,8 +2114,13 @@ async function fetchFinance() {
                 ${r.type === 'income' ? '+' : '-'}${r.amount}
             </td>
             <td>${escapeHtml(r.handler)}</td>
+            ${canEditFinance ? `<td><button class="btn-edit-sm" onclick="openFinanceModal(${r.id})">编辑</button><button class="btn-del-sm" onclick="deleteFinance(${r.id}, event)">删除</button></td>` : ''}
         </tr>
     `).join('');
+    
+        // 动态控制表头操作列
+        const financeOpTh = document.getElementById('finance-op-th');
+        if (financeOpTh) financeOpTh.classList.toggle('hidden', !canEditFinance);
     } catch(e) {
         console.error('获取财务记录失败:', e);
         alert('获取财务记录失败: ' + e.message);
@@ -2678,44 +2658,6 @@ async function deleteTask(taskId, event) {
     }
 }
 
-async function completeTask(taskId, event) {
-    // 兼容旧版：直接完成任务
-    if(!confirm('确认完成此任务？')) return;
-    
-    // 获取按钮并禁用，防止重复提交
-    const btn = event?.target;
-    const oldText = btn ? btn.innerText : '';
-    if (btn) {
-        btn.disabled = true;
-        btn.innerText = '完成中...';
-    }
-    
-    const memberName = currentUser ? currentUser.name : '未知用户';
-    
-    try {
-        const res = await fetch(`${API_BASE}/tasks/complete`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(withToken({ task_id: taskId, member_name: memberName }))
-        });
-        
-        if(res.ok) {
-            fetchTasks();
-            alert(`任务完成！${getPointsName()}已到账。`);
-        } else {
-            alert('完成任务失败');
-        }
-    } catch(e) {
-        console.error(e);
-        alert('网络错误');
-    } finally {
-        if (btn) {
-            btn.innerText = oldText;
-            btn.disabled = false;
-        }
-    }
-}
-
 // ============================================================================
 // 活动管理模块
 // ============================================================================
@@ -2935,6 +2877,31 @@ async function submitPoem() {
     }
 }
 
+function openFinanceModal(id = null) {
+    if (id) {
+        // 编辑模式：从缓存查找记录填充表单
+        const record = _cachedFinance.find(r => r.id === id);
+        if (!record) return;
+        editingFinanceId = id;
+        document.querySelector('#modal-finance h3').innerText = '编辑财务记录';
+        document.getElementById('f-type').value = record.type || 'income';
+        document.getElementById('f-category').value = record.category || '会费';
+        document.getElementById('f-amount').value = record.amount;
+        document.getElementById('f-summary').value = record.summary || '';
+        document.getElementById('f-handler').value = record.handler || '';
+    } else {
+        // 新建模式：清空表单
+        editingFinanceId = null;
+        document.querySelector('#modal-finance h3').innerText = '财务记账';
+        document.getElementById('f-type').value = 'income';
+        document.getElementById('f-category').value = '会费';
+        document.getElementById('f-amount').value = '';
+        document.getElementById('f-summary').value = '';
+        document.getElementById('f-handler').value = '';
+    }
+    toggleModal('modal-finance');
+}
+
 async function submitFinance() {
     const submitBtn = document.querySelector('#modal-finance button');
     const originalText = submitBtn.innerText;
@@ -2947,8 +2914,7 @@ async function submitFinance() {
             category: document.getElementById('f-category').value,
             amount: parseFloat(document.getElementById('f-amount').value),
             summary: document.getElementById('f-summary').value,
-            handler: document.getElementById('f-handler').value,
-            date: new Date().toISOString().split('T')[0]
+            handler: document.getElementById('f-handler').value
         };
 
         if (isNaN(data.amount) || !data.summary || !data.handler) {
@@ -2956,19 +2922,30 @@ async function submitFinance() {
             return;
         }
 
-        const response = await fetch(`${API_BASE}/finance`, {
+        // 区分新建vs编辑
+        let url = `${API_BASE}/finance`;
+        if (editingFinanceId) {
+            url = `${API_BASE}/finance/update`;
+            data.id = editingFinanceId;
+            // 编辑模式：保留原始日期
+            const original = _cachedFinance.find(r => r.id === editingFinanceId);
+            data.date = original ? original.date : new Date().toISOString().split('T')[0];
+        } else {
+            // 新建模式：使用当天日期
+            data.date = new Date().toISOString().split('T')[0];
+        }
+
+        const response = await fetchWithAuth(url, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(withToken(data))
+            body: JSON.stringify(data)
         });
 
-        if (!response.ok) throw new Error(`Server Error: ${response.status}`);
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.error || `Server Error: ${response.status}`);
+        }
 
-        document.getElementById('f-amount').value = '';
-        document.getElementById('f-summary').value = '';
-        document.getElementById('f-handler').value = '';
-        document.getElementById('f-category').value = '会费';
-        
         toggleModal('modal-finance');
         showSection('finance');
     } catch(err) {
@@ -2976,6 +2953,43 @@ async function submitFinance() {
     } finally {
         submitBtn.innerText = originalText;
         submitBtn.disabled = false;
+    }
+}
+
+async function deleteFinance(id, event) {
+    if (!confirm('确定删除此财务记录？此操作不可撤销。')) return;
+    
+    const btn = event?.target;
+    const oldText = btn ? btn.innerText : '';
+    const oldStyle = btn ? btn.style.cssText : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = '删除中...';
+        btn.style.background = '#999';
+        btn.style.color = '#fff';
+        btn.style.borderColor = '#999';
+    }
+    
+    try {
+        const res = await fetchWithAuth(`${API_BASE}/finance/delete`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id})
+        });
+        if (res.ok) {
+            fetchFinance();
+        } else {
+            const err = await res.json().catch(() => ({}));
+            alert('删除失败: ' + (err.error || '未知错误'));
+        }
+    } catch(e) {
+        alert('网络错误，请重试');
+    } finally {
+        if (btn) {
+            btn.style.cssText = oldStyle;
+            btn.innerText = oldText;
+            btn.disabled = false;
+        }
     }
 }
 
@@ -4239,10 +4253,6 @@ async function exportBackup() {
         }
         if (importBtn) importBtn.disabled = false;
     }
-}
-
-function triggerImportBackup() {
-    document.getElementById('backup-file-input').click();
 }
 
 async function importBackup(event) {

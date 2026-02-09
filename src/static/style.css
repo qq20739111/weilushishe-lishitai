@@ -662,6 +662,35 @@ button:disabled {
     border-color: #e74c3c;
 }
 
+/* Finance table action buttons */
+.btn-edit-sm, .btn-del-sm {
+    padding: 3px 10px;
+    font-size: 0.7rem;
+    border-radius: 12px;
+    cursor: pointer;
+    border: 1px solid;
+    background: transparent;
+    transition: all 0.2s;
+    margin: 2px;
+}
+.btn-edit-sm {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+.btn-edit-sm:hover {
+    background: var(--accent);
+    color: white;
+}
+.btn-del-sm {
+    color: #999;
+    border-color: #ddd;
+}
+.btn-del-sm:hover {
+    background: #e74c3c;
+    color: white;
+    border-color: #e74c3c;
+}
+
 /* Poems */
 .poem-card { 
     padding: 30px; 

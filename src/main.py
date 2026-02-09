@@ -1448,47 +1448,6 @@ def delete_task(request):
         return {"status": "success"}
     return Response("Error", 500)
 
-@api_route('/api/tasks/complete', methods=['POST'])
-@require_permission(ROLE_DIRECTOR)
-def complete_task(request):
-    """快速完成任务"""
-    data = request.json
-    tid = data.get('task_id')
-    u_name = data.get('member_name')
-    
-    reward = 0
-    task_found = False
-    
-    def task_updater(t):
-        nonlocal reward, task_found
-        if t.get('status') == 'open':
-            t['status'] = 'completed'
-            t['assignee'] = u_name
-            reward = t.get('reward', 0)
-            task_found = True
-            
-    db_tasks.update(tid, task_updater)
-    
-    if not task_found: return Response('Task not open or found', 404)
-    
-    def member_updater(m):
-        m['points'] = m.get('points', 0) + reward
-        
-    members = db_members.get_all()
-    target_mid = None
-    for m in members:
-        if m.get('name') == u_name:
-            target_mid = m.get('id')
-            break
-            
-    if target_mid:
-        db_members.update(target_mid, member_updater)
-        # 记录积分变动日志
-        if reward > 0:
-            record_points_change(target_mid, u_name, reward, '完成任务')
-        
-    return {"status": "success", "gained": reward}
-
 # --- Members API ---
 @api_route('/api/members', methods=['GET'])
 def list_members(request):
@@ -1935,7 +1894,7 @@ def add_finance(request):
     return data
 
 @api_route('/api/finance/update', methods=['POST'])
-@require_permission(ROLE_FINANCE)
+@require_permission(ROLE_SUPER_ADMIN)
 def update_finance(request):
     """更新财务记录"""
     data = request.json
@@ -1959,7 +1918,7 @@ def update_finance(request):
     return Response('{"error": "记录不存在"}', 404, {'Content-Type': 'application/json'})
 
 @api_route('/api/finance/delete', methods=['POST'])
-@require_permission(ROLE_FINANCE)
+@require_permission(ROLE_SUPER_ADMIN)
 def delete_finance(request):
     """删除财务记录"""
     data = request.json
@@ -2357,216 +2316,6 @@ def sys_stats(request):
         error(f"获取统计数据失败: {e}", "Stats")
         return {}
 
-@api_route('/api/backup/export')
-@require_permission(ROLE_SUPER_ADMIN)
-def backup_export(request):
-    """导出全站数据备份（管理员权限）"""
-    try:
-        # 获取WiFi配置（包含密码）
-        wifi_config = get_wifi_config()
-        wifi_backup = {
-            "wifi_ssid": wifi_config.get('wifi_ssid', ''),
-            "wifi_password": wifi_config.get('wifi_password', ''),
-            "sta_use_static_ip": wifi_config.get('sta_use_static_ip', False),
-            "sta_ip": wifi_config.get('sta_ip', ''),
-            "sta_subnet": wifi_config.get('sta_subnet', '255.255.255.0'),
-            "sta_gateway": wifi_config.get('sta_gateway', ''),
-            "sta_dns": wifi_config.get('sta_dns', '8.8.8.8'),
-            "ap_ssid": wifi_config.get('ap_ssid', ''),
-            "ap_password": wifi_config.get('ap_password', ''),
-            "ap_ip": wifi_config.get('ap_ip', '192.168.1.68')
-        }
-        
-        # 获取系统配置（debug_mode, watchdog配置）
-        system_config = {}
-        try:
-            with open('data/config.json', 'r') as f:
-                config = json.load(f)
-                system_config = {
-                    "debug_mode": config.get('debug_mode', False),
-                    "watchdog_enabled": config.get('watchdog_enabled', True),
-                    "watchdog_timeout": config.get('watchdog_timeout', 120)
-                }
-        except:
-            system_config = {"debug_mode": False, "watchdog_enabled": True, "watchdog_timeout": 120}
-        
-        backup_data = {
-            "version": "1.0",
-            "data": {
-                "members": db_members.get_all(),
-                "poems": db_poems.get_all(),
-                "activities": db_activities.get_all(),
-                "tasks": db_tasks.get_all(),
-                "finance": db_finance.get_all(),
-                "points_logs": db_points_logs.get_all(),
-                "login_logs": db_login_logs.get_all(),
-                "settings": get_settings(),
-                "wifi_config": wifi_backup,
-                "system_config": system_config
-            }
-        }
-        gc.collect()
-        return backup_data
-    except Exception as e:
-        error(f"备份导出失败: {e}", "Backup")
-        return Response('{"error": "导出失败"}', 500, {'Content-Type': 'application/json'})
-
-@api_route('/api/backup/import', methods=['POST'])
-@require_permission(ROLE_SUPER_ADMIN)
-def backup_import(request):
-    """导入数据备份（管理员权限）"""
-    try:
-        # 喂狗，防止处理大数据时超时
-        watchdog.feed()
-        gc.collect()  # 解析前释放内存
-        
-        backup = request.json
-        # 如果 request.json 为空（大文件跳过了自动解析），手动解析
-        if not backup and request.body:
-            gc.collect()  # 解析前再次释放内存
-            watchdog.feed()
-            try:
-                backup = json.loads(request.body)
-                debug(f"备份导入: 手动解析JSON成功, 大小={len(request.body)}", "Backup")
-            except Exception as parse_err:
-                debug(f"备份导入: 手动解析JSON失败: {parse_err}, body长度={len(request.body)}", "Backup")
-                return Response('{"error": "JSON解析失败，文件可能过大或格式错误"}', 400, {'Content-Type': 'application/json'})
-        
-        # 详细的错误诊断
-        if not backup:
-            body_len = len(request.body) if request.body else 0
-            debug(f"备份导入失败: backup为空, body长度={body_len}", "Backup")
-            return Response('{"error": "无法解析备份数据，请检查文件格式"}', 400, {'Content-Type': 'application/json'})
-        if 'version' not in backup:
-            return Response('{"error": "备份文件缺少版本信息"}', 400, {'Content-Type': 'application/json'})
-        if 'data' not in backup:
-            return Response('{"error": "备份文件缺少数据内容"}', 400, {'Content-Type': 'application/json'})
-        
-        data = backup['data']
-        
-        # 逐个恢复数据，每个数据类型处理后释放内存并喂狗
-        if 'members' in data:
-            with open('data/members.jsonl', 'w') as f:
-                for item in data['members']:
-                    f.write(json.dumps(item) + "\n")
-            data['members'] = None  # 释放内存
-            gc.collect()
-            watchdog.feed()
-        
-        if 'poems' in data:
-            with open('data/poems.jsonl', 'w') as f:
-                for item in data['poems']:
-                    f.write(json.dumps(item) + "\n")
-            data['poems'] = None
-            gc.collect()
-            watchdog.feed()
-        
-        if 'activities' in data:
-            with open('data/activities.jsonl', 'w') as f:
-                for item in data['activities']:
-                    f.write(json.dumps(item) + "\n")
-            data['activities'] = None
-            gc.collect()
-            watchdog.feed()
-        
-        if 'tasks' in data:
-            with open('data/tasks.jsonl', 'w') as f:
-                for item in data['tasks']:
-                    f.write(json.dumps(item) + "\n")
-            data['tasks'] = None
-            gc.collect()
-            watchdog.feed()
-        
-        if 'finance' in data:
-            with open('data/finance.jsonl', 'w') as f:
-                for item in data['finance']:
-                    f.write(json.dumps(item) + "\n")
-            data['finance'] = None
-            gc.collect()
-            watchdog.feed()
-        
-        if 'points_logs' in data:
-            with open('data/points_logs.jsonl', 'w') as f:
-                for item in data['points_logs']:
-                    f.write(json.dumps(item) + "\n")
-            data['points_logs'] = None
-            gc.collect()
-            watchdog.feed()
-        
-        if 'login_logs' in data:
-            with open('data/login_logs.jsonl', 'w') as f:
-                for item in data['login_logs']:
-                    f.write(json.dumps(item) + "\n")
-            data['login_logs'] = None
-            gc.collect()
-            watchdog.feed()
-        
-        if 'settings' in data:
-            # 从配置文件读取完整的配置
-            with open('data/config.json', 'r') as f:
-                config = json.load(f)
-            
-            # 合并设置数据
-            settings_data = data['settings']
-            for key in ['custom_member_fields', 'password_salt', 'points_name', 'system_name']:
-                if key in settings_data:
-                    config[key] = settings_data[key]
-            
-            # 保存回配置文件
-            with open('data/config.json', 'w') as f:
-                json.dump(config, f)
-            data['settings'] = None
-            gc.collect()
-            watchdog.feed()
-        
-        # 恢复WiFi配置（包含密码）
-        if 'wifi_config' in data:
-            existing_config = get_wifi_config()
-            new_config = data['wifi_config']
-            # 更新所有WiFi配置包括密码
-            existing_config['wifi_ssid'] = new_config.get('wifi_ssid', existing_config.get('wifi_ssid', ''))
-            if 'wifi_password' in new_config and new_config['wifi_password']:
-                existing_config['wifi_password'] = new_config['wifi_password']
-            existing_config['sta_use_static_ip'] = new_config.get('sta_use_static_ip', False)
-            existing_config['sta_ip'] = new_config.get('sta_ip', '')
-            existing_config['sta_subnet'] = new_config.get('sta_subnet', '255.255.255.0')
-            existing_config['sta_gateway'] = new_config.get('sta_gateway', '')
-            existing_config['sta_dns'] = new_config.get('sta_dns', '8.8.8.8')
-            existing_config['ap_ssid'] = new_config.get('ap_ssid', existing_config.get('ap_ssid', ''))
-            if 'ap_password' in new_config and new_config['ap_password']:
-                existing_config['ap_password'] = new_config['ap_password']
-            existing_config['ap_ip'] = new_config.get('ap_ip', '192.168.1.68')
-            save_wifi_config(existing_config)
-            data['wifi_config'] = None
-            gc.collect()
-            watchdog.feed()
-        
-        # 恢复系统配置（debug_mode, watchdog配置）
-        if 'system_config' in data:
-            try:
-                with open('data/config.json', 'r') as f:
-                    config = json.load(f)
-                sys_cfg = data['system_config']
-                for key in ['debug_mode', 'watchdog_enabled', 'watchdog_timeout']:
-                    if key in sys_cfg:
-                        config[key] = sys_cfg[key]
-                with open('data/config.json', 'w') as f:
-                    json.dump(config, f)
-            except Exception as e:
-                debug(f"恢复系统配置失败: {e}", "Backup")
-            data['system_config'] = None
-            gc.collect()
-            watchdog.feed()
-        
-        # 最终清理
-        backup = None
-        data = None
-        gc.collect()
-        return {"status": "success", "message": "数据恢复成功"}
-    except Exception as e:
-        error(f"备份导入失败: {e}", "Backup")
-        return Response('{"error": "导入失败"}', 500, {'Content-Type': 'application/json'})
-
 # --- 分表备份API（支持大数据量） ---
 # 数据表映射
 BACKUP_TABLES = {
@@ -2578,12 +2327,6 @@ BACKUP_TABLES = {
     'points_logs': db_points_logs,
     'login_logs': db_login_logs
 }
-
-@api_route('/api/backup/tables')
-@require_permission(ROLE_SUPER_ADMIN)
-def backup_list_tables(request):
-    """获取可备份的表列表（管理员权限）"""
-    return {"tables": list(BACKUP_TABLES.keys()) + ['settings', 'wifi_config', 'system_config']}
 
 @api_route('/api/backup/export-table')
 @require_permission(ROLE_SUPER_ADMIN)
