@@ -61,6 +61,43 @@ def start_watchdog_timer():
 
 app = Microdot()
 
+# --- API 响应缓存（页面第一页数据） ---
+# 页面列表类缓存：TTL 600秒（10分钟兜底，写入时精确失效）
+for _ck in ['api:poems:page1', 'api:activities:page1', 'api:tasks:page1',
+            'api:members:page1', 'api:finance:page1']:
+    cache.register(_ck, ctype='value', ttl=600)
+# 统计/聚合类缓存：TTL 300秒（5分钟兜底）
+for _ck in ['api:finance:stats', 'api:points:ranking', 'api:system:stats']:
+    cache.register(_ck, ctype='value', ttl=300)
+del _ck
+info("API响应缓存已注册", "Cache")
+
+def invalidate_api_cache(*keys):
+    """批量失效 API 响应缓存"""
+    for k in keys:
+        cache.invalidate(k)
+
+def _invalidate_weekly_cache():
+    """清除所有已注册的周统计缓存"""
+    for k in list(cache._cfg.keys()):
+        if k.startswith('api:weekly:'):
+            cache.invalidate(k)
+
+def invalidate_module_cache(module):
+    """按模块失效全部相关 API 缓存（备份导入用）"""
+    m = {
+        'poems': ['api:poems:page1', 'api:system:stats'],
+        'activities': ['api:activities:page1', 'api:system:stats'],
+        'tasks': ['api:tasks:page1', 'api:system:stats'],
+        'members': ['api:members:page1', 'api:points:ranking', 'api:system:stats'],
+        'finance': ['api:finance:page1', 'api:finance:stats', 'api:system:stats'],
+        'points_logs': ['api:points:ranking'],
+    }
+    for k in m.get(module, []):
+        cache.invalidate(k)
+    if module in ('poems', 'activities'):
+        _invalidate_weekly_cache()
+
 # 维护模式白名单（这些接口即使在维护模式下也可访问）
 MAINTENANCE_WHITELIST = [
     '/api/login',
@@ -982,6 +1019,7 @@ def record_points_change(member_id, member_name, change, reason):
         'timestamp': get_current_time()
     }
     db_points_logs.append(log)
+    invalidate_api_cache('api:points:ranking')
 
 def record_login_log(member_id, member_name, phone, status, ip=''):
     """记录登录日志"""
@@ -1122,20 +1160,18 @@ def list_poems(request):
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 10))
         q = request.args.get('q', None)
-        
         if q:
-            # print(f"[API] Raw query: {q}")
             q = simple_unquote(q)
-            # print(f"[API] Decoded: {q}")
-        
-        # Backward compatibility: if no args, return top 20? 
-        # But if 'all=true' (implied currently by frontend logic), existing logic expects everything.
-        # But for 10k records we can't.
-        # So we default to returning the first page (latest 20).
-        # Frontend 'fetchPoems' will receive this array.
-        
-        items, total = db_poems.fetch_page(page, limit, reverse=True, search_term=q)
-        return items 
+        # 默认第一页且无搜索：走缓存
+        if page == 1 and limit == 10 and not q:
+            cached = cache.get_val('api:poems:page1')
+            if cached is not None:
+                return cached
+            items, _ = db_poems.fetch_page(1, 10, reverse=True)
+            cache.set_val('api:poems:page1', items)
+            return items
+        items, _ = db_poems.fetch_page(page, limit, reverse=True, search_term=q)
+        return items
     except Exception as e:
         error(f"获取诗歌列表失败: {e}", "API")
         return []
@@ -1164,9 +1200,16 @@ def random_poem(request):
 
 @api_route('/api/poems/weekly-stats', methods=['GET'])
 def weekly_poem_stats(request):
-    """获取年度诗词周统计（流式计算，内存友好）"""
+    """获取年度诗词周统计（流式计算，内存友好，支持缓存）"""
     try:
         year = int(request.args.get('year', time.localtime()[0]))
+        # 按年份动态注册缓存
+        cache_key = 'api:weekly:{}'.format(year)
+        if cache_key not in cache._cfg:
+            cache.register(cache_key, ctype='value', ttl=3600)
+        cached = cache.get_val(cache_key)
+        if cached is not None:
+            return cached
         days_in_months = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
         if (year % 4 == 0 and year % 100 != 0) or (year % 400 == 0):
             days_in_months[2] = 29
@@ -1200,7 +1243,9 @@ def weekly_poem_stats(request):
             except:
                 pass
         gc.collect()
-        return {'year': year, 'weeks': weeks, 'act_weeks': act_weeks}
+        result = {'year': year, 'weeks': weeks, 'act_weeks': act_weeks}
+        cache.set_val(cache_key, result)
+        return result
     except Exception as e:
         error(f"获取诗词周统计失败: {e}", "API")
         return {'year': 0, 'weeks': [0] * 52, 'act_weeks': []}
@@ -1225,6 +1270,10 @@ def create_poem(request):
     if 'date' not in data: data['date'] = '2026-01-01'
     
     if db_poems.append(data):
+        year = data.get('date', '')[:4]
+        invalidate_api_cache('api:poems:page1', 'api:system:stats')
+        if year:
+            cache.invalidate('api:weekly:{}'.format(year))
         return data
     return Response('Write Failed', 500)
 
@@ -1256,6 +1305,10 @@ def update_poem(request):
         if 'date' in data: record['date'] = data['date']
         
     if db_poems.update(pid, updater):
+        invalidate_api_cache('api:poems:page1')
+        year = data.get('date', poem.get('date', ''))[:4]
+        if year:
+            cache.invalidate('api:weekly:{}'.format(year))
         return {"status": "success"}
     return Response("Poem not found", 404)
 
@@ -1274,6 +1327,8 @@ def delete_poem(request):
         return Response('{"error": "只能删除自己的作品"}', 403, {'Content-Type': 'application/json'})
     
     if db_poems.delete(pid):
+        invalidate_api_cache('api:poems:page1', 'api:system:stats')
+        _invalidate_weekly_cache()
         return {"status": "success"}
     return Response("Poem not found", 404)
 
@@ -1285,6 +1340,14 @@ def list_activities(request):
         limit = int(request.args.get('limit', 10))
         q = request.args.get('q', None)
         if q: q = simple_unquote(q)
+        # 默认第一页且无搜索：走缓存
+        if page == 1 and limit == 10 and not q:
+            cached = cache.get_val('api:activities:page1')
+            if cached is not None:
+                return cached
+            items, _ = db_activities.fetch_page(1, 10, reverse=True)
+            cache.set_val('api:activities:page1', items)
+            return items
         items, _ = db_activities.fetch_page(page, limit, reverse=True, search_term=q)
         return items
     except: return []
@@ -1301,6 +1364,10 @@ def create_activity(request):
     
     data['id'] = db_activities.get_max_id() + 1
     db_activities.append(data)
+    year = data.get('date', '')[:4]
+    invalidate_api_cache('api:activities:page1', 'api:system:stats')
+    if year:
+        cache.invalidate('api:weekly:{}'.format(year))
     return data
 
 @api_route('/api/activities/update', methods=['POST'])
@@ -1320,6 +1387,8 @@ def update_activity(request):
             if k in data: r[k] = data[k]
             
     if db_activities.update(data.get('id'), updater):
+        invalidate_api_cache('api:activities:page1')
+        _invalidate_weekly_cache()
         return {"status": "success"}
     return Response("Not Found", 404)
 
@@ -1327,7 +1396,10 @@ def update_activity(request):
 @require_permission(ROLE_DIRECTOR)
 def delete_activity(request):
     pid = request.json.get('id')
-    if db_activities.delete(pid): return {"status": "success"}
+    if db_activities.delete(pid):
+        invalidate_api_cache('api:activities:page1', 'api:system:stats')
+        _invalidate_weekly_cache()
+        return {"status": "success"}
     return Response("Not Found", 404)
 
 # --- Tasks API ---
@@ -1341,6 +1413,14 @@ def list_tasks(request):
         q = request.args.get('q', None)
         if q:
             q = simple_unquote(q)
+        # 默认第一页且无搜索：走缓存
+        if page == 1 and limit == 10 and not q:
+            cached = cache.get_val('api:tasks:page1')
+            if cached is not None:
+                return cached
+            items, _ = db_tasks.fetch_page(1, 10, reverse=True)
+            cache.set_val('api:tasks:page1', items)
+            return items
         items, _ = db_tasks.fetch_page(page, limit, reverse=True, search_term=q)
         return items
     except Exception as e:
@@ -1384,6 +1464,7 @@ def create_task(request):
         'completed_at': None
     }
     db_tasks.append(task)
+    invalidate_api_cache('api:tasks:page1', 'api:system:stats')
     return task
 
 @api_route('/api/tasks/update', methods=['POST'])
@@ -1414,6 +1495,7 @@ def update_task(request):
     db_tasks.update(tid, task_updater)
     
     if updated:
+        invalidate_api_cache('api:tasks:page1')
         return {'success': True}
     return Response('{"error": "任务不存在"}', 404, {'Content-Type': 'application/json'})
 
@@ -1440,6 +1522,7 @@ def claim_task(request):
     db_tasks.update(tid, task_updater)
     
     if not task_found: return Response('Task not available', 404)
+    invalidate_api_cache('api:tasks:page1')
     return {"status": "success"}
 
 @api_route('/api/tasks/unclaim', methods=['POST'])
@@ -1468,6 +1551,7 @@ def unclaim_task(request):
         t['claimed_at'] = None
             
     db_tasks.update(tid, task_updater)
+    invalidate_api_cache('api:tasks:page1')
     return {"status": "success"}
 
 @api_route('/api/tasks/submit', methods=['POST'])
@@ -1494,6 +1578,7 @@ def submit_task(request):
         t['submitted_at'] = get_current_time()
             
     db_tasks.update(tid, task_updater)
+    invalidate_api_cache('api:tasks:page1')
     return {"status": "success"}
 
 @api_route('/api/tasks/approve', methods=['POST'])
@@ -1547,6 +1632,7 @@ def approve_task(request):
         db_members.update(assignee_id, member_updater)
         record_points_change(assignee_id, assignee_name or '', reward, '完成任务')
     
+    invalidate_api_cache('api:tasks:page1', 'api:members:page1', 'api:points:ranking')
     return {"status": "success", "gained": reward}
 
 @api_route('/api/tasks/reject', methods=['POST'])
@@ -1568,6 +1654,7 @@ def reject_task(request):
     db_tasks.update(tid, task_updater)
     
     if not task_found: return Response('Task not found', 404)
+    invalidate_api_cache('api:tasks:page1')
     return {"status": "success"}
 
 @api_route('/api/tasks/delete', methods=['POST'])
@@ -1577,6 +1664,7 @@ def delete_task(request):
     data = request.json
     tid = data.get('task_id')
     if db_tasks.delete(tid):
+        invalidate_api_cache('api:tasks:page1', 'api:system:stats')
         return {"status": "success"}
     return Response("Error", 500)
 
@@ -1602,6 +1690,16 @@ def list_members(request):
                 return err
         
         if page > 0 and limit > 0:
+            # 非公开模式、第一页默认参数且无搜索：走缓存
+            if not public_mode and page == 1 and limit == 10 and not q:
+                cached = cache.get_val('api:members:page1')
+                if cached is not None:
+                    return cached
+                items, _ = db_members.fetch_page(1, 10, reverse=False)
+                for m in items:
+                    m.pop('password', None)
+                cache.set_val('api:members:page1', items)
+                return items
             items, total = db_members.fetch_page(page, limit, reverse=False, search_term=q)
             if public_mode:
                 items = [{'id': m.get('id'), 'alias': m.get('alias', ''), 'points': m.get('points', 0)} for m in items]
@@ -1687,6 +1785,7 @@ def create_member(request):
             
     data['id'] = db_members.get_max_id() + 1
     db_members.append(data)
+    invalidate_api_cache('api:members:page1', 'api:system:stats')
     return data
 
 @api_route('/api/members/update', methods=['POST'])
@@ -1793,6 +1892,9 @@ def update_member_route(request):
         # 如果积分有变动，记录日志
         if points_change != 0 and member_name:
             record_points_change(mid, member_name, points_change, '管理员调整')
+        invalidate_api_cache('api:members:page1')
+        if points_change != 0:
+            invalidate_api_cache('api:points:ranking')
         return {"status": "success"}
     return Response("Not Found", 404)
 
@@ -1872,12 +1974,17 @@ def delete_member_route(request):
     
     if db_members.delete(member_id):
         invalidate_role_cache(member_id)
+        invalidate_api_cache('api:members:page1', 'api:system:stats')
         return {"status": "success"}
     return Response("Error", 500)
 
 @api_route('/api/points/yearly_ranking', methods=['GET'])
 def yearly_points_ranking(request):
     """获取年度积分排行榜（最近1年新增积分）"""
+    # 缓存检查
+    cached = cache.get_val('api:points:ranking')
+    if cached is not None:
+        return cached
     # 计算1年前的时间戳
     t = time.localtime()
     one_year_ago = "{:04d}-{:02d}-{:02d}T00:00:00".format(
@@ -1913,7 +2020,9 @@ def yearly_points_ranking(request):
     _check_low_memory()
     
     # 返回前10名
-    return ranking[:10]
+    result = ranking[:10]
+    cache.set_val('api:points:ranking', result)
+    return result
 
 @api_route('/api/check-token', methods=['GET'])
 def check_token_route(request):
@@ -2117,6 +2226,14 @@ def list_finance(request):
     try:
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 20))
+        # 默认第一页：走缓存
+        if page == 1 and limit == 20:
+            cached = cache.get_val('api:finance:page1')
+            if cached is not None:
+                return cached
+            items, _ = db_finance.fetch_page(1, 20, reverse=True)
+            cache.set_val('api:finance:page1', items)
+            return items
         items, _ = db_finance.fetch_page(page, limit, reverse=True)
         return items
     except Exception as e:
@@ -2129,6 +2246,10 @@ def finance_stats(request):
     """获取财务统计：本年度收支 + 全时段累计余额
     单次文件扫描，年份预过滤减少JSON解析，最后一行获取余额
     """
+    # 缓存检查
+    cached = cache.get_val('api:finance:stats')
+    if cached is not None:
+        return cached
     year_str = str(time.localtime()[0])
     year_income = 0
     year_expense = 0
@@ -2168,7 +2289,9 @@ def finance_stats(request):
                 balance = _get_last_balance()
         except:
             balance = _get_last_balance()
-    return {"year_income": year_income, "year_expense": year_expense, "balance": balance, "year": int(year_str)}
+    result = {"year_income": year_income, "year_expense": year_expense, "balance": balance, "year": int(year_str)}
+    cache.set_val('api:finance:stats', result)
+    return result
 
 @api_route('/api/finance', methods=['POST'])
 @require_permission(ROLE_FINANCE)
@@ -2197,6 +2320,7 @@ def add_finance(request):
     else:
         data['balance_after'] = last_balance - data['amount']
     db_finance.append(data)
+    invalidate_api_cache('api:finance:page1', 'api:finance:stats', 'api:system:stats')
     return data
 
 @api_route('/api/finance/update', methods=['POST'])
@@ -2223,6 +2347,7 @@ def update_finance(request):
     
     fid = data.get('id')
     if _rewrite_finance_file(update_id=fid, update_data=data):
+        invalidate_api_cache('api:finance:page1', 'api:finance:stats')
         return {"status": "success"}
     return Response('{"error": "记录不存在"}', 404, {'Content-Type': 'application/json'})
 
@@ -2236,6 +2361,7 @@ def delete_finance(request):
     
     fid = data.get('id')
     if _rewrite_finance_file(delete_id=fid):
+        invalidate_api_cache('api:finance:page1', 'api:finance:stats', 'api:system:stats')
         return {"status": "success"}
     return Response('{"error": "记录不存在"}', 404, {'Content-Type': 'application/json'})
 
@@ -2615,13 +2741,18 @@ def sys_info(request):
 def sys_stats(request):
     """获取各模块数据统计（登录用户可查看）"""
     try:
-        return {
+        cached = cache.get_val('api:system:stats')
+        if cached is not None:
+            return cached
+        result = {
             "members": db_members.count(),
             "poems": db_poems.count(),
             "activities": db_activities.count(),
             "tasks": db_tasks.count(),
             "finance": db_finance.count()
         }
+        cache.set_val('api:system:stats', result)
+        return result
     except Exception as e:
         error(f"获取统计数据失败: {e}", "Stats")
         return {}
@@ -2755,6 +2886,8 @@ def backup_import_table(request):
             # members表导入后清除角色缓存
             if table == 'members':
                 invalidate_role_cache()
+            # 清除对应模块的 API 缓存
+            invalidate_module_cache(table)
             info(f"分表导入 [{table}]: 成功写入 {len(table_data)} 条记录", "Backup")
             return {"status": "success", "table": table, "count": len(table_data)}
         
