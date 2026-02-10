@@ -100,8 +100,8 @@ def api_route(url, methods=['GET']):
                 s = get_settings()
                 user_id, role = get_operator_role(request)
                 
-                # 维护模式检查
-                if s.get('maintenance_mode', False):
+                # 网站访问检查（site_open=false时仅管理员可访问）
+                if not s.get('site_open', True):
                     if role not in ['super_admin', 'admin']:
                         return _RESP_MAINTENANCE
                 
@@ -785,7 +785,7 @@ ROLE_FINANCE = ['super_admin', 'admin', 'finance']  # 财务级别：超管、�
 # 系统设置字段列表（get_settings / save_settings / backup 共用）
 SETTINGS_KEYS = [
     'custom_member_fields', 'password_salt', 'points_name', 'system_name',
-    'token_expire_days', 'maintenance_mode', 'allow_guest',
+    'token_expire_days', 'site_open', 'allow_guest',
     'chat_enabled', 'chat_guest_max', 'chat_max_users', 'chat_cache_size'
 ]
 
@@ -1035,7 +1035,7 @@ def get_settings():
                 'points_name': config.get('points_name', '围炉值'),
                 'system_name': config.get('system_name', '围炉诗社·理事台'),
                 'token_expire_days': config.get('token_expire_days', DEFAULT_TOKEN_EXPIRE_DAYS),
-                'maintenance_mode': config.get('maintenance_mode', False),
+                'site_open': config.get('site_open', True),
                 'allow_guest': config.get('allow_guest', True),
                 'chat_enabled': config.get('chat_enabled', True),
                 'chat_guest_max': config.get('chat_guest_max', 10),
@@ -1051,7 +1051,7 @@ def get_settings():
             'points_name': '围炉值',
             'system_name': '围炉诗社·理事台',
             'token_expire_days': DEFAULT_TOKEN_EXPIRE_DAYS,
-            'maintenance_mode': False,
+            'site_open': True,
             'allow_guest': True,
             'chat_enabled': True,
             'chat_guest_max': 10,
@@ -1939,9 +1939,9 @@ def login_route(request):
                 try:
                     m = json.loads(line)
                     if m.get('phone') == p and verify_password(pw, m.get('password', '')):
-                        # 检查维护模式：只允许管理员登录
+                        # 检查网站访问状态：未开放时只允许管理员登录
                         s = get_settings()
-                        if s.get('maintenance_mode', False):
+                        if not s.get('site_open', True):
                             role = m.get('role', 'member')
                             if role not in ['super_admin', 'admin']:
                                 record_login_log(m.get('id'), m.get('name', '未知'), p, 'failed', request.client_ip)
@@ -2276,7 +2276,7 @@ def settings_fields(request):
 @api_route('/api/settings/system', methods=['GET', 'POST'])
 def settings_system(request):
     """获取或更新系统基础设置（理事及以上权限）
-    包含：系统名称、积分名称、维护模式、龙门阸开关、龙门阸人数上限、缓存大小
+    包含：系统名称、积分名称、网站访问开关、龙门阸开关、龙门阸人数上限、缓存大小
     """
     s = get_settings()
     if request.method == 'GET':
@@ -2284,7 +2284,7 @@ def settings_system(request):
         return {
             "system_name": s.get('system_name', '围炉诗社·理事台'),
             "points_name": s.get('points_name', '围炉值'),
-            "maintenance_mode": s.get('maintenance_mode', False),
+            "site_open": s.get('site_open', True),
             "allow_guest": s.get('allow_guest', True),
             "chat_enabled": s.get('chat_enabled', True),
             "chat_guest_max": s.get('chat_guest_max', 10),
@@ -2307,8 +2307,8 @@ def settings_system(request):
             if not pn or len(pn) > 10:
                 return Response('{"error": "积分名称为必填项且不超过10个字符"}', 400, {'Content-Type': 'application/json'})
             s['points_name'] = pn
-        if 'maintenance_mode' in data:
-            s['maintenance_mode'] = bool(data['maintenance_mode'])
+        if 'site_open' in data:
+            s['site_open'] = bool(data['site_open'])
         if 'allow_guest' in data:
             s['allow_guest'] = bool(data['allow_guest'])
         if 'chat_enabled' in data:

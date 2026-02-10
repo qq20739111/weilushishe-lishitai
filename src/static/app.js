@@ -610,8 +610,8 @@ async function checkLogin() {
     const isAdmin = currentUser && ['super_admin', 'admin'].includes(currentUser.role);
     
     // 检查维护模式
-    if (settings.maintenance_mode && !isAdmin) {
-        // 维护模式且非管理员，显示维护页面
+    if (!settings.site_open && !isAdmin) {
+        // 网站未开放且非管理员，显示维护页面
         showMaintenancePage();
         return;
     }
@@ -707,7 +707,7 @@ async function checkSystemSettings() {
     } catch(e) {
         console.error('检查系统设置失败:', e);
     }
-    return { maintenance_mode: false, allow_guest: true };
+    return { site_open: true, allow_guest: true };
 }
 
 /**
@@ -3939,13 +3939,13 @@ async function loadSiteSettings() {
         const res = await fetch(`${API_BASE}/settings/system`);
         if(res.ok) {
             const data = await res.json();
-            const maintenanceEl = document.getElementById('setting-maintenance-mode');
+            const siteOpenEl = document.getElementById('setting-site-open');
             const allowGuestEl = document.getElementById('setting-allow-guest');
             const chatEnabledEl = document.getElementById('setting-chat-enabled');
             const chatGuestMaxEl = document.getElementById('setting-chat-guest-max');
             const chatMaxUsersEl = document.getElementById('setting-chat-max-users');
             const chatCacheSizeEl = document.getElementById('setting-chat-cache-size');
-            if(maintenanceEl) maintenanceEl.checked = data.maintenance_mode === true;
+            if(siteOpenEl) siteOpenEl.checked = data.site_open !== false;
             if(allowGuestEl) allowGuestEl.checked = data.allow_guest !== false;
             if(chatEnabledEl) chatEnabledEl.checked = data.chat_enabled !== false;
             if(chatGuestMaxEl) chatGuestMaxEl.value = data.chat_guest_max ?? 10;
@@ -3959,7 +3959,7 @@ async function loadSiteSettings() {
 
 // 保存站点功能设置
 async function saveSiteSettings() {
-    const maintenanceEl = document.getElementById('setting-maintenance-mode');
+    const siteOpenEl = document.getElementById('setting-site-open');
     const allowGuestEl = document.getElementById('setting-allow-guest');
     const chatEnabledEl = document.getElementById('setting-chat-enabled');
     const chatGuestMaxEl = document.getElementById('setting-chat-guest-max');
@@ -3967,7 +3967,7 @@ async function saveSiteSettings() {
     const chatCacheSizeEl = document.getElementById('setting-chat-cache-size');
     
     const settings = {};
-    if(maintenanceEl) settings.maintenance_mode = maintenanceEl.checked;
+    if(siteOpenEl) settings.site_open = siteOpenEl.checked;
     if(allowGuestEl) settings.allow_guest = allowGuestEl.checked;
     if(chatEnabledEl) settings.chat_enabled = chatEnabledEl.checked;
     
