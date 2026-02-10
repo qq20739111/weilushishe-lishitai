@@ -364,6 +364,86 @@ button:disabled {
     letter-spacing: 0.5px;
 }
 
+/* Cache Statistics */
+.cache-stats-summary {
+    display: grid;
+    grid-template-columns: repeat(3, auto) 1fr;
+    gap: 20px;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+}
+
+.cache-detail-table {
+    max-height: 360px;
+    overflow-y: auto;
+}
+
+.cache-table {
+    font-size: 0.85rem;
+}
+
+.cache-table-header {
+    display: grid;
+    grid-template-columns: 2fr 0.7fr 0.6fr 0.8fr 0.6fr 0.6fr;
+    gap: 8px;
+    padding: 8px 12px;
+    background: #f5f7fa;
+    border-radius: var(--radius) var(--radius) 0 0;
+    font-weight: 600;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.cache-table-row {
+    display: grid;
+    grid-template-columns: 2fr 0.7fr 0.6fr 0.8fr 0.6fr 0.6fr;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid #f0f0f0;
+    align-items: center;
+}
+
+.cache-table-row:last-child {
+    border-bottom: none;
+}
+
+.cache-table-row:hover {
+    background: #fafbfc;
+}
+
+.cache-name {
+    font-family: monospace;
+    font-size: 0.82rem;
+    color: var(--primary);
+    word-break: break-all;
+}
+
+.cache-type-badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 0.72rem;
+    font-weight: 500;
+}
+
+.cache-type-dict { background: #e8f5e9; color: #2e7d32; }
+.cache-type-list { background: #e3f2fd; color: #1565c0; }
+.cache-type-value { background: #fff3e0; color: #e65100; }
+.cache-type-const { background: #f3e5f5; color: #7b1fa2; }
+
+.cache-chat-memory {
+    margin-top: 12px;
+    padding: 8px 12px;
+    background: #f8f9fa;
+    border-radius: var(--radius);
+    font-size: 0.82rem;
+    color: var(--text-muted);
+}
+
 /* Role Permissions Grid */
 .role-permissions-grid {
     display: grid;
@@ -1128,6 +1208,36 @@ button:disabled {
     }
     .stat-value {
         font-size: 1.1rem;
+    }
+    
+    /* 缓存统计移动端适配 */
+    .cache-stats-summary {
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+    }
+    .cache-table-header {
+        display: none;
+    }
+    .cache-table-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 12px;
+        padding: 10px 12px;
+    }
+    .cache-table-row > div {
+        font-size: 0.8rem;
+    }
+    .cache-table-row > div::before {
+        content: attr(data-label) ": ";
+        color: var(--text-muted);
+        font-size: 0.72rem;
+    }
+    .cache-name::before {
+        display: none;
+    }
+    .cache-name {
+        width: 100%;
+        font-weight: 600;
     }
     
     .role-permissions-grid {

@@ -24,6 +24,7 @@ const API_BASE = '/api';
 let currentUser = null;
 let _customFields = [];
 let _systemSettings = { points_name: '围炉值' };
+let _settingsLoaded = false; // 标记 /api/settings/system 是否已加载
 
 // ============================================================================
 // 表单验证规则配置
@@ -693,6 +694,9 @@ async function checkSystemSettings() {
         const res = await fetch(`${API_BASE}/settings/system`);
         if (res.ok) {
             const data = await res.json();
+            // 缓存到全局，避免 fetchSystemSettings 重复请求
+            _systemSettings = Object.assign(_systemSettings, data);
+            _settingsLoaded = true;
             // 更新网页标题和页脚站名
             const name = data.system_name || '围炉诗社·理事台';
             document.title = name;
@@ -3767,15 +3771,18 @@ async function fetchCustomFields() {
 // --- 系统设置管理 ---
 async function fetchSystemSettings() {
     try {
-        // 获取公开设置（系统名称、积分名称）
-        const res = await fetch(`${API_BASE}/settings/system`);
-        if(res.ok) {
-            _systemSettings = await res.json();
-            // 更新网页标题和页脚站名
-            const name = _systemSettings.system_name || '围炉诗社·理事台';
-            document.title = name;
-            const footerName = document.getElementById('footer-site-name');
-            if (footerName) footerName.textContent = name;
+        // 如果 checkSystemSettings 已加载基础设置，跳过重复请求
+        if (!_settingsLoaded) {
+            const res = await fetch(`${API_BASE}/settings/system`);
+            if(res.ok) {
+                _systemSettings = await res.json();
+                _settingsLoaded = true;
+                // 更新网页标题和页脚站名
+                const name = _systemSettings.system_name || '围炉诗社·理事台';
+                document.title = name;
+                const footerName = document.getElementById('footer-site-name');
+                if (footerName) footerName.textContent = name;
+            }
         }
         
         // 管理员额外获取salt和登录有效期（需要鉴权）
@@ -4073,6 +4080,9 @@ function renderAdminSettings() {
     // 加载数据统计
     loadDataStats();
     
+    // 加载缓存统计
+    loadCacheStats();
+    
     // 加载WiFi配置
     loadWifiConfig();
     
@@ -4209,6 +4219,102 @@ async function loadDataStats() {
     } catch(e) { 
         console.error('Failed to load data stats', e); 
     }
+}
+
+// --- 缓存统计 ---
+async function loadCacheStats() {
+    const container = document.getElementById('cache-detail-list');
+    if(!container) return;
+    // 非超管不加载（卡片已隐藏，避免无权限请求）
+    if(!currentUser || currentUser.role !== 'super_admin') return;
+
+    try {
+        const res = await fetchWithAuth(`${API_BASE}/system/cache-stats`);
+        if(!res.ok) return;
+        const data = await res.json();
+
+        // 提取顶层字段
+        const memFree = data.memory_free || 0;
+        const memTotal = data.memory_total || 0;
+        const chatSizeBytes = data.chat_size_bytes || 0;
+        const chatSizeLimit = data.chat_size_limit || 0;
+
+        // 收集缓存槽统计
+        const slots = [];
+        let totalEntries = 0, totalHits = 0, totalMisses = 0;
+        for(const [name, info] of Object.entries(data)) {
+            if(typeof info !== 'object' || !info.type) continue;
+            slots.push({ name, ...info });
+            totalEntries += info.size || 0;
+            totalHits += info.hits || 0;
+            totalMisses += info.misses || 0;
+        }
+
+        // 摘要
+        const totalReqs = totalHits + totalMisses;
+        const overallRate = totalReqs > 0 ? Math.round(totalHits / totalReqs * 100) : 0;
+        document.getElementById('cache-slot-count').innerText = slots.length;
+        document.getElementById('cache-total-entries').innerText = totalEntries;
+        document.getElementById('cache-total-hit-rate').innerText = overallRate + '%';
+
+        // 内存条
+        if(memTotal > 0) {
+            const memUsed = memTotal - memFree;
+            const memPct = Math.round(memUsed / memTotal * 100);
+            const memBar = document.getElementById('cache-memory-bar');
+            const memText = document.getElementById('cache-memory-text');
+            memText.innerText = formatBytes(memFree) + ' / ' + formatBytes(memTotal);
+            memBar.style.width = memPct + '%';
+            memBar.className = 'status-bar-fill' + (memPct > 85 ? ' danger' : memPct > 70 ? ' warning' : '');
+        }
+
+        // 详情表格
+        if(slots.length === 0) {
+            container.innerHTML = '<div class="empty-hint">暂无缓存数据</div>';
+            return;
+        }
+
+        const typeLabels = { dict: '字典', list: '列表', value: '单值', const: '常量' };
+        const header = `<div class="cache-table-header">
+            <div>缓存名称</div><div>类型</div><div>条目</div><div>命中率</div><div>TTL</div><div>过期</div>
+        </div>`;
+        const rows = slots.map(s => {
+            const total = s.hits + s.misses;
+            const rate = total > 0 ? s.hit_rate + '%' : '-';
+            const ttl = s.ttl > 0 ? s.ttl + 's' : '-';
+            const expires = s.expires > 0 ? s.expires : '-';
+            const typeLabel = typeLabels[s.type] || s.type;
+            return `<div class="cache-table-row">
+                <div class="cache-name" data-label="名称">${s.name}</div>
+                <div data-label="类型"><span class="cache-type-badge cache-type-${s.type}">${typeLabel}</span></div>
+                <div data-label="条目">${s.size}</div>
+                <div data-label="命中率">${rate}</div>
+                <div data-label="TTL">${ttl}</div>
+                <div data-label="过期">${expires}</div>
+            </div>`;
+        }).join('');
+
+        // 聊天内存用量附加信息
+        let chatInfo = '';
+        if(chatSizeLimit > 0) {
+            const chatPct = Math.round(chatSizeBytes / chatSizeLimit * 100);
+            chatInfo = `<div class="cache-chat-memory">聊天内存: ${formatBytes(chatSizeBytes)} / ${formatBytes(chatSizeLimit)} (${chatPct}%)</div>`;
+        }
+
+        container.innerHTML = `<div class="cache-table">${header}${rows}</div>${chatInfo}`;
+    } catch(e) {
+        console.error('Failed to load cache stats', e);
+        container.innerHTML = '<div class="empty-hint">加载缓存统计失败</div>';
+    }
+}
+
+function formatBytes(bytes) {
+    if(bytes === 0 || bytes == null) return '0 B';
+    const units = ['B', 'KB', 'MB'];
+    let i = 0;
+    let val = bytes;
+    while(val >= 1024 && i < units.length - 1) { val /= 1024; i++; }
+    return val.toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
 }
 
 // --- 登录日志 ---

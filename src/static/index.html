@@ -221,6 +221,36 @@
                 </div>
             </div>
 
+            <div class="card super-admin-only-card" style="margin-top:20px;">
+                <h3>缓存统计</h3>
+                <div id="cache-stats-container">
+                    <div class="cache-stats-summary">
+                        <div class="status-item">
+                            <span class="status-label">缓存槽总数</span>
+                            <span class="status-value" id="cache-slot-count">-</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">总条目数</span>
+                            <span class="status-value" id="cache-total-entries">-</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">总命中率</span>
+                            <span class="status-value" id="cache-total-hit-rate">-</span>
+                        </div>
+                        <div class="status-item status-bar-item">
+                            <div class="status-bar-header">
+                                <span class="status-label">空闲内存</span>
+                                <span class="status-text" id="cache-memory-text">-</span>
+                            </div>
+                            <div class="status-bar">
+                                <div class="status-bar-fill" id="cache-memory-bar"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="cache-detail-table" id="cache-detail-list"></div>
+                </div>
+            </div>
+
             <div class="card" style="margin-top:20px;">
                 <h3>数据统计</h3>
                 <div class="stats-grid" id="admin-data-stats">

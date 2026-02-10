@@ -2,6 +2,7 @@ import machine
 import network
 import time
 import json
+import gc
 import ntptime
 from lib.WifiConnector import WifiConnector
 from lib.SystemStatus import status_led
@@ -45,6 +46,7 @@ def sync_ntp_time():
             machine.RTC().datetime((tm[0], tm[1], tm[2], tm[6], tm[3], tm[4], tm[5], 0))
             t = time.localtime()
             info(f"NTP时间同步成功: {t[0]:04d}-{t[1]:02d}-{t[2]:02d} {t[3]:02d}:{t[4]:02d}:{t[5]:02d}", "NTP")
+            gc.collect()
             return True
         except Exception as e:
             if attempt < NTP_MAX_RETRIES - 1:
@@ -76,6 +78,7 @@ def connect_wifi():
     # Optimize: Set longer timeout and retry logic
     wifi.connect_timeout = 30  # Increase connection timeout to 30s
     wifi.max_retries = 5       # Increase max retries
+    gc.collect()  # 配置参数已提取，释放临时对象
     
     info(f"正在连接 {ssid} (超时: {wifi.connect_timeout}秒, 重试: {wifi.max_retries}次)...", "WiFi")
     
@@ -108,6 +111,7 @@ def connect_wifi():
                 except Exception as e:
                     warn(f"静态IP配置失败: {e}", "WiFi")
             
+            gc.collect()
             break
         else:
             debug(f"WiFi连接尝试 {attempt+1} 失败: {wifi.last_error}", "WiFi")

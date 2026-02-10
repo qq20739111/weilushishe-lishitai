@@ -13,17 +13,26 @@ try:
     from lib.Logger import log, debug, info, warn, error
     from lib.Watchdog import watchdog
     from lib.SystemStatus import status_led
+    from lib.CacheManager import cache
     info("main.py 模块导入成功", "Init")
 except ImportError as e:
     print(f"\n[CRITICAL] 导入失败: {e}")
     sys.exit()
 
-# 记录系统启动时间（用于计算uptime）
-_system_start_time = time.time()
-
-# 运行时Token签名密钥（每次启动随机生成128位，与密码盐值完全独立）
-_RUNTIME_TOKEN_SECRET = ubinascii.hexlify(os.urandom(16)).decode('utf-8')
+# 注册运行时常量到缓存管理器
+cache.register('runtime:start_time', ctype='const', initial=time.time())
+cache.register('runtime:token_secret', ctype='const',
+               initial=ubinascii.hexlify(os.urandom(16)).decode('utf-8'))
 info("Token签名密钥已生成（128位随机）", "Security")
+
+# 低内存保护阈值（字节），低于此值时触发缓存紧急释放
+LOW_MEMORY_THRESHOLD = 51200  # 50KB
+
+def _check_low_memory():
+    """检查内存水位，低于阈值时紧急释放所有非常量缓存"""
+    if gc.mem_free() < LOW_MEMORY_THRESHOLD:
+        warn(f"内存不足({gc.mem_free()}B < {LOW_MEMORY_THRESHOLD}B)，触发缓存紧急释放", "Memory")
+        cache.flush_all()
 
 # 看门狗定时喂狗器（防止空闲超时）
 _watchdog_timer = None
@@ -71,6 +80,10 @@ PUBLIC_DATA_WHITELIST = [
     '/api/points/yearly_ranking',
 ]
 
+# 预定义API错误响应（避免每次请求重新创建对象）
+_RESP_MAINTENANCE = Response('{"error": "系统维护中，请稍后再试"}', 503, {'Content-Type': 'application/json'})
+_RESP_GUEST_DENIED = Response('{"error": "请先登录后访问"}', 401, {'Content-Type': 'application/json'})
+
 def api_route(url, methods=['GET']):
     """
     API路由装饰器，包装原生route装饰器
@@ -90,8 +103,7 @@ def api_route(url, methods=['GET']):
                 # 维护模式检查
                 if s.get('maintenance_mode', False):
                     if role not in ['super_admin', 'admin']:
-                        from lib.microdot import Response
-                        return Response('{"error": "系统维护中，请稍后再试"}', 503, {'Content-Type': 'application/json'})
+                        return _RESP_MAINTENANCE
                 
                 # 游客访问控制（未登录用户）
                 # 公开数据接口的GET请求允许访问（前端已处理登录跳转）
@@ -99,8 +111,7 @@ def api_route(url, methods=['GET']):
                 is_public_data = url in PUBLIC_DATA_WHITELIST
                 if not s.get('allow_guest', True) and not user_id:
                     if not (is_get_request and is_public_data):
-                        from lib.microdot import Response
-                        return Response('{"error": "请先登录后访问"}', 401, {'Content-Type': 'application/json'})
+                        return _RESP_GUEST_DENIED
             
             result = f(request, *args, **kwargs)
             status_led.flash_once()  # API响应后LED快闪
@@ -328,7 +339,7 @@ def _get_token_expire_seconds():
 
 def _get_token_secret():
     """获取Token签名密钥（运行时随机生成，与密码盐值独立，重启后失效）"""
-    return _RUNTIME_TOKEN_SECRET
+    return cache.get_val('runtime:token_secret')
 
 def generate_token(user_id):
     """
@@ -432,6 +443,11 @@ def simple_unquote(s):
 class JsonlDB:
     def __init__(self, filepath, auto_migrate=True):
         self.filepath = filepath
+        # 注册到缓存管理器（替代 self._max_id_cache / self._count_cache）
+        self._ck_maxid = 'db:' + filepath + ':maxid'
+        self._ck_count = 'db:' + filepath + ':count'
+        cache.register(self._ck_maxid, ctype='value', initial=None)
+        cache.register(self._ck_count, ctype='value', initial=None)
         self._ensure_dir()
         if auto_migrate:
             self._migrate_legacy_json()
@@ -467,13 +483,26 @@ class JsonlDB:
         try:
             with open(self.filepath, 'a') as f:
                 f.write(json.dumps(record) + "\n")
+            # 维护缓存
+            cnt = cache.get_val(self._ck_count)
+            if cnt is not None:
+                cache.set_val(self._ck_count, cnt + 1)
+            if 'id' in record:
+                mid = cache.get_val(self._ck_maxid)
+                if mid is not None:
+                    pid = int(record['id'])
+                    if pid > mid:
+                        cache.set_val(self._ck_maxid, pid)
             return True
         except Exception as e:
             error(f"追加记录失败: {e}", "DB")
             return False
 
     def get_max_id(self):
-        """Scan file to find max numeric ID"""
+        """Scan file to find max numeric ID (with cache)"""
+        cached = cache.get_val(self._ck_maxid)
+        if cached is not None:
+            return cached
         max_id = 0
         try:
             with open(self.filepath, 'r') as f:
@@ -489,6 +518,7 @@ class JsonlDB:
                         debug(f"解析ID行失败: {e}", "DB")
         except OSError:
             pass  # 文件可能不存在，正常情况
+        cache.set_val(self._ck_maxid, max_id)
         return max_id
 
     def fetch_page(self, page=1, limit=10, reverse=True, search_term=None, search_fields=None):
@@ -651,6 +681,11 @@ class JsonlDB:
                 return False
             os.remove(self.filepath)
             os.rename(tmp_path, self.filepath)
+            # 删除成功，维护缓存
+            cnt = cache.get_val(self._ck_count)
+            if cnt is not None and cnt > 0:
+                cache.set_val(self._ck_count, cnt - 1)
+            cache.set_val(self._ck_maxid, None)  # 删除后 max_id 可能变化，置空重算
             return True
         except Exception as e:
             error(f"删除记录失败: {e}", "DB")
@@ -703,7 +738,10 @@ class JsonlDB:
             debug(f"iter_records失败: {e}", "DB")
 
     def count(self):
-        """统计记录数量（只计数，不解析JSON，内存友好）"""
+        """统计记录数量（带缓存，只计数，不解析JSON，内存友好）"""
+        cached = cache.get_val(self._ck_count)
+        if cached is not None:
+            return cached
         if not file_exists(self.filepath):
             return 0
         count = 0
@@ -714,6 +752,7 @@ class JsonlDB:
                         count += 1
         except Exception as e:
             debug(f"统计记录数失败: {e}", "DB")
+        cache.set_val(self._ck_count, count)
         return count
 
 
@@ -808,15 +847,12 @@ def can_manage_member(operator_id, operator_role, target_member_id, target_membe
     return True, None
 
 # 用户角色缓存 {user_id: role}，避免每次请求都扫描members文件
-_role_cache = {}
+# TTL=1800秒(30分钟)自动过期，max_size=50防止无界增长
+cache.register('role', ctype='dict', ttl=1800, max_size=50)
 
 def invalidate_role_cache(user_id=None):
     """清除角色缓存。user_id为None时清除全部，否则清除指定用户"""
-    global _role_cache
-    if user_id is None:
-        _role_cache = {}
-    elif user_id in _role_cache:
-        del _role_cache[user_id]
+    cache.invalidate('role', key=user_id)
 
 def get_operator_role(request):
     """
@@ -838,13 +874,15 @@ def get_operator_role(request):
         valid, user_id, err_msg = verify_token(token)
         if valid and user_id:
             # 优先查缓存
-            if user_id in _role_cache:
-                return user_id, _role_cache[user_id]
+            role_store = cache.store('role')
+            if user_id in role_store:
+                return user_id, role_store[user_id]
             # 缓存未命中，按ID精确查找
             member = db_members.get_by_id(user_id)
             if member:
                 role = member.get('role', 'member')
-                _role_cache[user_id] = role
+                role_store[user_id] = role
+                cache.enforce_max_size('role')
                 return user_id, role
     except Exception as e:
         debug(f"获取操作者角色失败: {e}", "Auth")
@@ -972,25 +1010,26 @@ def record_login_log(member_id, member_name, phone, status, ip=''):
             os.rename(tmp_path, db_login_logs.filepath)
     except Exception as e:
         debug(f"清理登录日志失败: {e}", "Log")
+    gc.collect()
 
-# Legacy for settings (kept as simple JSON for now)
-_settings_cache = None  # 内存缓存，避免每次API调用都读取Flash
+# 系统设置缓存，避免每次API调用都读取Flash
+# TTL=3600秒(1小时)兜底，防止手动invalidate遗漏导致配置不同步
+cache.register('settings', ctype='value', ttl=3600, initial=None)
 
 def invalidate_settings_cache():
     """清除设置缓存，下次get_settings()将重新从文件读取"""
-    global _settings_cache
-    _settings_cache = None
+    cache.invalidate('settings')
 
 def get_settings():
     """获取系统设置，优先从内存缓存读取，缓存未命中时从文件加载"""
-    global _settings_cache
-    if _settings_cache is not None:
-        return _settings_cache
+    cached = cache.get_val('settings')
+    if cached is not None:
+        return cached
     try:
         with open('data/config.json', 'r') as f:
             config = json.load(f)
             # 返回系统设置相关的键值
-            _settings_cache = {
+            result = {
                 'custom_member_fields': config.get('custom_member_fields', []),
                 'password_salt': config.get('password_salt', 'weilu2018'),
                 'points_name': config.get('points_name', '围炉值'),
@@ -1003,7 +1042,8 @@ def get_settings():
                 'chat_max_users': config.get('chat_max_users', 20),
                 'chat_cache_size': config.get('chat_cache_size', 128)
             }
-            return _settings_cache
+            cache.set_val('settings', result)
+            return result
     except: 
         return {
             'custom_member_fields': [],
@@ -1869,6 +1909,8 @@ def yearly_points_ranking(request):
         for mid, data in member_yearly_points.items()
     ]
     ranking.sort(key=lambda x: x['yearly_points'], reverse=True)
+    gc.collect()
+    _check_low_memory()
     
     # 返回前10名
     return ranking[:10]
@@ -1905,8 +1947,14 @@ def login_route(request):
                                 record_login_log(m.get('id'), m.get('name', '未知'), p, 'failed', request.client_ip)
                                 return Response('{"error": "系统维护中，仅管理员可登录"}', 503, {'Content-Type': 'application/json'})
                         
-                        m_safe = m.copy()
-                        if 'password' in m_safe: del m_safe['password']
+                        m_safe = {
+                            'id': m.get('id'),
+                            'name': m.get('name', ''),
+                            'phone': m.get('phone', ''),
+                            'alias': m.get('alias', ''),
+                            'role': m.get('role', 'member'),
+                            'birthday': m.get('birthday', ''),
+                        }
                         # 生成登录Token
                         token, expires_in = generate_token(m.get('id'))
                         m_safe['token'] = token
@@ -2105,6 +2153,7 @@ def finance_stats(request):
                 except:
                     pass
         gc.collect()
+        _check_low_memory()
     except:
         pass
     # 从最后一条记录获取累计余额
@@ -2495,7 +2544,7 @@ def sys_info(request):
             total_ram = 2048 * 1024  # 默认2048KB
         
         # 计算系统运行时间
-        uptime_seconds = int(time.time() - _system_start_time)
+        uptime_seconds = int(time.time() - cache.get_val('runtime:start_time'))
         uptime_hours = uptime_seconds // 3600
         uptime_minutes = (uptime_seconds % 3600) // 60
         uptime_secs = uptime_seconds % 60
@@ -2607,6 +2656,7 @@ def backup_export_table(request):
     
     watchdog.feed()
     gc.collect()
+    _check_low_memory()
     
     try:
         if table in BACKUP_TABLES:
@@ -2668,6 +2718,7 @@ def backup_import_table(request):
     
     watchdog.feed()
     gc.collect()
+    _check_low_memory()
     
     try:
         data = request.json
@@ -2780,12 +2831,13 @@ def get_chat_guest_max():
     s = get_settings()
     return s.get('chat_guest_max', 10)
 
-# 内存缓存数据结构
-_chat_messages = []       # 消息列表: [{id, user_id, user_name, content, timestamp}, ...]
-_chat_users = {}          # 在线用户: {user_id: user_name, ...}
-_chat_guests = {}         # 游客映射: {guest_id: {'name': ..., 'expire': timestamp}, ...}
-_chat_current_size = 0    # 当前消息占用字节数
-_chat_msg_id = 0          # 消息ID计数器
+# 聊天室内存缓存数据结构（注册到缓存管理器）
+cache.register('chat:messages', ctype='list')       # 消息列表: [{id, user_id, user_name, content, timestamp}, ...]
+cache.register('chat:users', ctype='dict')           # 在线用户: {user_id: user_name, ...}
+cache.register('chat:guests', ctype='dict')          # 游客映射: {guest_id: {'name': ..., 'expire': timestamp}, ...}
+cache.register('chat:size', ctype='value', initial=0)      # 当前消息占用字节数
+cache.register('chat:msg_id', ctype='value', initial=0)    # 消息ID计数器
+cache.register('chat:msg_count', ctype='dict')       # 每用户消息计数: {user_id: count}
 
 def _estimate_msg_size(msg):
     """估算单条消息占用的内存大小"""
@@ -2793,42 +2845,43 @@ def _estimate_msg_size(msg):
 
 def _chat_cleanup():
     """清理过期消息，保持总大小在限制内"""
-    global _chat_messages, _chat_current_size, _chat_users, _chat_guests
+    messages = cache.store('chat:messages')
+    users = cache.store('chat:users')
+    guests = cache.store('chat:guests')
+    msg_count = cache.store('chat:msg_count')
     
     max_size = get_chat_max_size()
+    current_size = cache.get_val('chat:size')
     # 删除最早的消息直到空间足够
-    while _chat_current_size > max_size and _chat_messages:
-        old_msg = _chat_messages.pop(0)
-        _chat_current_size -= _estimate_msg_size(old_msg)
+    while current_size > max_size and messages:
+        old_msg = messages.pop(0)
+        current_size -= _estimate_msg_size(old_msg)
         
-        # 检查该用户是否还有消息
+        # 通过计数器 O(1) 判断该用户是否还有消息
         user_id = old_msg.get('user_id')
-        has_other_msg = any(m.get('user_id') == user_id for m in _chat_messages)
-        
-        if not has_other_msg:
+        cnt = msg_count.get(user_id, 1) - 1
+        if cnt <= 0:
+            msg_count.pop(user_id, None)
             # 移除用户在线状态
-            if user_id in _chat_users:
-                del _chat_users[user_id]
-            if user_id in _chat_guests:
-                del _chat_guests[user_id]
+            users.pop(user_id, None)
+            guests.pop(user_id, None)
+        else:
+            msg_count[user_id] = cnt
     
+    cache.set_val('chat:size', current_size)
     gc.collect()
+    _check_low_memory()
 
 def _get_member_display_name(member_id):
     """获取成员显示名称（优先雅号）"""
-    try:
-        with open(db_members.filepath, 'r') as f:
-            for line in f:
-                m = json.loads(line)
-                if m.get('id') == member_id:
-                    return m.get('alias') or m.get('name') or '未知'
-    except:
-        pass
+    member = db_members.get_by_id(member_id)
+    if member:
+        return member.get('alias') or member.get('name') or '未知'
     return '未知'
 
 def _allocate_guest_name():
     """分配一个可用的游客昵称，返回 (guest_id, guest_name) 或 (None, None)"""
-    global _chat_guests
+    guests = cache.store('chat:guests')
     
     # 检查游客上限配置
     guest_max = get_chat_guest_max()
@@ -2838,17 +2891,17 @@ def _allocate_guest_name():
     now = int(time.time())
     
     # 先清理过期的游客
-    expired_ids = [gid for gid, info in _chat_guests.items() 
+    expired_ids = [gid for gid, info in guests.items() 
                    if info.get('expire', 0) < now]
     for gid in expired_ids:
-        del _chat_guests[gid]
+        del guests[gid]
     
     # 检查当前游客数量是否已达上限
-    if len(_chat_guests) >= guest_max:
+    if len(guests) >= guest_max:
         return None, None
     
     # 查找可用的昵称（仅在配置范围内）
-    used_names = set(info.get('name') for info in _chat_guests.values())
+    used_names = set(info.get('name') for info in guests.values())
     for i, name in enumerate(CHAT_GUEST_NAMES[:guest_max]):
         if name not in used_names:
             guest_id = -(i + 1)  # 负数ID标识游客
@@ -2857,7 +2910,8 @@ def _allocate_guest_name():
 
 def _get_guest_name(guest_id):
     """获取游客昵称"""
-    info = _chat_guests.get(guest_id)
+    guests = cache.store('chat:guests')
+    info = guests.get(guest_id)
     if info:
         return info.get('name')
     return None
@@ -2870,12 +2924,13 @@ def chat_get_messages(request):
         return Response('{"error": "龙门阵已关闭"}', 403, {'Content-Type': 'application/json'})
     try:
         after_id = int(request.args.get('after', 0))
+        messages = cache.store('chat:messages')
         # 返回指定ID之后的消息
         if after_id > 0:
-            messages = [m for m in _chat_messages if m.get('id', 0) > after_id]
+            result = [m for m in messages if m.get('id', 0) > after_id]
         else:
-            messages = list(_chat_messages)  # 返回所有消息
-        return messages
+            result = list(messages)  # 返回所有消息
+        return result
     except Exception as e:
         error(f"获取聊天消息失败: {e}", "Chat")
         return []
@@ -2887,11 +2942,13 @@ def chat_get_users(request):
     if not s.get('chat_enabled', True):
         return Response('{"error": "龙门阵已关闭"}', 403, {'Content-Type': 'application/json'})
     now = int(time.time())
+    chat_users = cache.store('chat:users')
+    chat_guests = cache.store('chat:guests')
     # 合并登录用户和游客（过滤过期游客）
     users = []
-    for uid, name in _chat_users.items():
+    for uid, name in chat_users.items():
         users.append({'id': uid, 'name': name, 'is_guest': False})
-    for uid, info in _chat_guests.items():
+    for uid, info in chat_guests.items():
         if info.get('expire', 0) >= now:
             users.append({'id': uid, 'name': info.get('name'), 'is_guest': True})
     return users
@@ -2899,7 +2956,8 @@ def chat_get_users(request):
 @api_route('/api/chat/join', methods=['POST'])
 def chat_join(request):
     """加入聊天室（游客自动分配昵称，有效期1小时）"""
-    global _chat_users, _chat_guests
+    chat_users = cache.store('chat:users')
+    chat_guests = cache.store('chat:guests')
     
     # 检查聊天室是否开启
     s = get_settings()
@@ -2914,18 +2972,18 @@ def chat_join(request):
     # 公共人数限制检查（登录用户和游客都需要检查）
     max_users = s.get('chat_max_users', 20)
     now = int(time.time())
-    active_guests = sum(1 for info in _chat_guests.values() if info.get('expire', 0) >= now)
-    current_users = len(_chat_users) + active_guests
+    active_guests = sum(1 for info in chat_guests.values() if info.get('expire', 0) >= now)
+    current_users = len(chat_users) + active_guests
     
     if user_id:
         # 登录用户：检查是否已在聊天室（已在则不重复计数）
-        if user_id not in _chat_users:
+        if user_id not in chat_users:
             # 新用户加入，检查人数限制
             if current_users >= max_users:
                 return Response('{"error": "龙门阵人数已满，请稍后再试"}', 403, {'Content-Type': 'application/json'})
         # 登录用户，使用真实名称
         display_name = _get_member_display_name(user_id)
-        _chat_users[user_id] = display_name
+        chat_users[user_id] = display_name
         return {'user_id': user_id, 'user_name': display_name, 'is_guest': False}
     else:
         # 游客：检查人数限制
@@ -2938,7 +2996,7 @@ def chat_join(request):
             return Response('{"error": "游客位置已满，请稍后再试"}', 403, {'Content-Type': 'application/json'})
         
         # 记录游客信息，设置过期时间
-        _chat_guests[guest_id] = {
+        chat_guests[guest_id] = {
             'name': guest_name,
             'expire': int(time.time()) + CHAT_GUEST_EXPIRE
         }
@@ -2947,7 +3005,9 @@ def chat_join(request):
 @api_route('/api/chat/send', methods=['POST'])
 def chat_send_message(request):
     """发送聊天消息"""
-    global _chat_messages, _chat_current_size, _chat_msg_id, _chat_users, _chat_guests
+    chat_users = cache.store('chat:users')
+    chat_guests = cache.store('chat:guests')
+    chat_messages = cache.store('chat:messages')
     
     # 检查聊天室是否开启
     s = get_settings()
@@ -2976,17 +3036,17 @@ def chat_send_message(request):
     if token_user_id:
         # 已登录用户：只使用Token中的身份，忽略请求体中的user_id，防止冒充
         sender_id = token_user_id
-        user_name = _chat_users.get(sender_id) or _get_member_display_name(sender_id)
-        _chat_users[sender_id] = user_name
+        user_name = chat_users.get(sender_id) or _get_member_display_name(sender_id)
+        chat_users[sender_id] = user_name
     elif request_user_id and request_user_id < 0:
         # 游客：验证游客身份（负数ID）
         sender_id = request_user_id
-        if sender_id not in _chat_guests:
+        if sender_id not in chat_guests:
             return Response('{"error": "请先加入龙门阵"}', 401, {'Content-Type': 'application/json'})
-        guest_info = _chat_guests[sender_id]
+        guest_info = chat_guests[sender_id]
         # 检查是否过期
         if guest_info.get('expire', 0) < int(time.time()):
-            del _chat_guests[sender_id]
+            del chat_guests[sender_id]
             return Response('{"error": "昵称已过期，请重新加入"}', 401, {'Content-Type': 'application/json'})
         user_name = guest_info.get('name')
         is_guest = True
@@ -2997,9 +3057,10 @@ def chat_send_message(request):
         return Response('{"error": "请先加入聊天室"}', 401, {'Content-Type': 'application/json'})
     
     # 构建消息
-    _chat_msg_id += 1
+    new_msg_id = cache.get_val('chat:msg_id') + 1
+    cache.set_val('chat:msg_id', new_msg_id)
     msg = {
-        'id': _chat_msg_id,
+        'id': new_msg_id,
         'user_id': sender_id,
         'user_name': user_name,
         'content': content,
@@ -3009,8 +3070,10 @@ def chat_send_message(request):
     
     # 添加消息并更新大小
     msg_size = _estimate_msg_size(msg)
-    _chat_messages.append(msg)
-    _chat_current_size += msg_size
+    chat_messages.append(msg)
+    cache.set_val('chat:size', cache.get_val('chat:size') + msg_size)
+    msg_count = cache.store('chat:msg_count')
+    msg_count[sender_id] = msg_count.get(sender_id, 0) + 1
     
     # 检查并清理超限消息
     _chat_cleanup()
@@ -3020,21 +3083,21 @@ def chat_send_message(request):
 @api_route('/api/chat/leave', methods=['POST'])
 def chat_leave(request):
     """离开聊天室（登录用户以Token为准，游客需验证身份）"""
-    global _chat_users, _chat_guests
+    chat_users = cache.store('chat:users')
+    chat_guests = cache.store('chat:guests')
     
     # 优先使用Token鉴权
     token_user_id, _ = get_operator_role(request)
     if token_user_id:
         # 登录用户：以Token身份为准，只能让自己离开
-        if token_user_id in _chat_users:
-            del _chat_users[token_user_id]
+        chat_users.pop(token_user_id, None)
         return {'status': 'success'}
     
     # 游客：只允许负数ID，且必须在游客列表中
     data = request.json or {}
     user_id = data.get('user_id')
-    if user_id and user_id < 0 and user_id in _chat_guests:
-        del _chat_guests[user_id]
+    if user_id and user_id < 0 and user_id in chat_guests:
+        del chat_guests[user_id]
         return {'status': 'success'}
     
     return {'status': 'success'}
@@ -3047,21 +3110,40 @@ def chat_status(request):
     chat_enabled = s.get('chat_enabled', True)
     if not chat_enabled:
         return {'chat_enabled': False}
+    chat_users = cache.store('chat:users')
+    chat_guests = cache.store('chat:guests')
     # 计算未过期的游客数量
-    active_guests = sum(1 for info in _chat_guests.values() if info.get('expire', 0) >= now)
+    active_guests = sum(1 for info in chat_guests.values() if info.get('expire', 0) >= now)
     max_users = s.get('chat_max_users', 20)
     guest_max = get_chat_guest_max()
     return {
-        'memory_used': _chat_current_size,
+        'memory_used': cache.get_val('chat:size'),
         'memory_limit': get_chat_max_size(),
-        'message_count': len(_chat_messages),
-        'user_count': len(_chat_users) + active_guests,
+        'message_count': len(cache.store('chat:messages')),
+        'user_count': len(chat_users) + active_guests,
         'max_users': max_users,
         'guest_count': active_guests,
         'guest_available': guest_max - active_guests,
         'guest_max': guest_max,
         'chat_enabled': s.get('chat_enabled', True)
     }
+
+@api_route('/api/system/cache-stats')
+@require_permission(ROLE_SUPER_ADMIN)
+def api_cache_stats(request):
+    """获取缓存统计信息（超级管理员权限）"""
+    gc.collect()
+    stats = cache.stats()
+    # 补充聊天室内存用量（stats只返回条目数，不含字节数）
+    stats['chat_size_bytes'] = cache.get_val('chat:size')
+    stats['chat_size_limit'] = get_chat_max_size()
+    stats['memory_free'] = gc.mem_free()
+    try:
+        stats['memory_total'] = gc.mem_free() + gc.mem_alloc()
+    except:
+        stats['memory_total'] = 0
+    gc.collect()
+    return stats
 
 if __name__ == '__main__':
     try:
