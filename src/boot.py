@@ -165,6 +165,15 @@ if __name__ == '__main__':
     connect_wifi()
     watchdog.feed()  # WiFi连接后喂狗
     
+    # 清理残留的数据库临时文件
+    try:
+        from lib.JsonlDB import cleanup_temp_files
+        n = cleanup_temp_files()
+        if n:
+            info("启动清理: 删除了 {} 个残留临时文件".format(n), "Boot")
+    except Exception as e:
+        warn("临时文件清理失败: {}".format(e), "Boot")
+    
     try:
         info("正在启动主应用程序...", "Boot")
         import main
@@ -195,6 +204,7 @@ if __name__ == '__main__':
             main.print_system_status()
             watchdog.feed()  # 启动Web服务前喂狗
             main.start_watchdog_timer()  # 启动定时喂狗器
+            main.start_wifi_monitor(wifi)  # 启动WiFi连接监控
             main.app.run(port=80)
     except Exception as e:
         error(f"启动主程序失败: {e}", "Boot")

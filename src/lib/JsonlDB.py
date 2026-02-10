@@ -330,3 +330,23 @@ class JsonlDB:
             debug(f"统计记录数失败: {e}", "DB")
         cache.set_val(self._ck_count, count)
         return count
+
+
+def cleanup_temp_files(data_dir='data'):
+    """启动时清理残留的数据库临时文件"""
+    cleaned = 0
+    try:
+        for f in os.listdir(data_dir):
+            if f.endswith('.tmp'):
+                path = data_dir + '/' + f
+                try:
+                    os.remove(path)
+                    debug("清理临时文件: " + path, "DB")
+                    cleaned += 1
+                except Exception as e:
+                    error("删除临时文件失败 " + path + ": " + str(e), "DB")
+    except Exception as e:
+        error("扫描临时文件失败: " + str(e), "DB")
+    if cleaned:
+        gc.collect()
+    return cleaned

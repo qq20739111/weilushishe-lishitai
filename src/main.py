@@ -62,6 +62,60 @@ def start_watchdog_timer():
         _watchdog_timer.init(period=30000, mode=machine.Timer.PERIODIC, callback=_watchdog_timer_callback)
         info("看门狗定时喂狗器已启动（周期30秒）", "Watchdog")
 
+# --- WiFi 连接监控定时器（断线自动重连） ---
+_wifi_monitor_timer = None
+_wifi_instance = None
+
+def _wifi_monitor_callback(timer):
+    """WiFi 监控定时器回调：检查连接状态，断线自动重连"""
+    global _wifi_instance
+    if _wifi_instance is None:
+        return
+    watchdog.feed()
+    try:
+        result = _wifi_instance.monitor_connection()
+        if result.get('connected'):
+            info("WiFi 自动重连成功", "WiFiMon")
+            _update_led_after_reconnect()
+        else:
+            warn("WiFi 重连失败，等待下次尝试", "WiFiMon")
+    except Exception as e:
+        error(f"WiFi 监控异常: {e}", "WiFiMon")
+    watchdog.feed()
+
+def _update_led_after_reconnect():
+    """重连成功后根据当前网络模式更新 LED 状态"""
+    try:
+        sta = network.WLAN(network.STA_IF)
+        ap = network.WLAN(network.AP_IF)
+        if sta.active() and sta.isconnected() and ap.active():
+            status_led.start_dual_mode()
+        elif sta.active() and sta.isconnected():
+            status_led.start_running()
+    except Exception:
+        pass
+
+def start_wifi_monitor(wifi_inst):
+    """启动 WiFi 监控定时器，由 boot.py 调用传入 wifi 实例"""
+    global _wifi_monitor_timer, _wifi_instance
+    if _wifi_monitor_timer is not None:
+        return
+    _wifi_instance = wifi_inst
+    # 使用 Timer(2)，避免与 LED(Timer 0) 和 Watchdog(Timer 1) 冲突
+    _wifi_monitor_timer = machine.Timer(2)
+    _wifi_monitor_timer.init(period=120000, mode=machine.Timer.PERIODIC,
+                             callback=_wifi_monitor_callback)
+    info("WiFi 监控定时器已启动（周期120秒）", "WiFiMon")
+
+def stop_wifi_monitor():
+    """停止 WiFi 监控定时器"""
+    global _wifi_monitor_timer, _wifi_instance
+    if _wifi_monitor_timer is not None:
+        _wifi_monitor_timer.deinit()
+        _wifi_monitor_timer = None
+        _wifi_instance = None
+        info("WiFi 监控定时器已停止", "WiFiMon")
+
 app = Microdot()
 
 # --- API 响应缓存（页面第一页数据） ---
