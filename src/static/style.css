@@ -292,25 +292,6 @@ button:disabled {
     background: linear-gradient(90deg, #3498db, #2980b9);
 }
 
-.status-bar-temp.warm {
-    background: linear-gradient(90deg, #f39c12, #e67e22);
-}
-
-.status-bar-temp.hot {
-    background: linear-gradient(90deg, #e74c3c, #c0392b);
-}
-
-.status-bar-wifi {
-    background: linear-gradient(90deg, var(--accent), #00a0a0);
-}
-
-.status-bar-wifi.weak {
-    background: linear-gradient(90deg, #f39c12, #e67e22);
-}
-
-.status-bar-wifi.poor {
-    background: linear-gradient(90deg, #e74c3c, #c0392b);
-}
 
 .status-time {
     font-size: 0.85em;
@@ -712,31 +693,35 @@ button:disabled {
     padding-top: 12px;
     border-top: 1px solid #f0f0f0;
 }
-.member-actions .btn-edit {
+.member-actions .btn-edit, .btn-edit-sm {
     background: transparent;
     color: var(--accent);
     border: 1px solid var(--accent);
-    padding: 5px 14px;
-    font-size: 0.75rem;
-    border-radius: 15px;
     cursor: pointer;
     transition: all 0.2s;
 }
-.member-actions .btn-edit:hover {
+.member-actions .btn-edit {
+    padding: 5px 14px;
+    font-size: 0.75rem;
+    border-radius: 15px;
+}
+.member-actions .btn-edit:hover, .btn-edit-sm:hover {
     background: var(--accent);
     color: white;
 }
-.member-actions .btn-remove {
+.member-actions .btn-remove, .btn-del-sm {
     background: transparent;
     color: #999;
     border: 1px solid #ddd;
-    padding: 5px 14px;
-    font-size: 0.75rem;
-    border-radius: 15px;
     cursor: pointer;
     transition: all 0.2s;
 }
-.member-actions .btn-remove:hover {
+.member-actions .btn-remove {
+    padding: 5px 14px;
+    font-size: 0.75rem;
+    border-radius: 15px;
+}
+.member-actions .btn-remove:hover, .btn-del-sm:hover {
     background: #e74c3c;
     color: white;
     border-color: #e74c3c;
@@ -747,28 +732,23 @@ button:disabled {
     padding: 3px 10px;
     font-size: 0.7rem;
     border-radius: 12px;
-    cursor: pointer;
-    border: 1px solid;
-    background: transparent;
-    transition: all 0.2s;
     margin: 2px;
 }
 .btn-edit-sm {
     color: var(--accent);
     border-color: var(--accent);
 }
-.btn-edit-sm:hover {
-    background: var(--accent);
-    color: white;
-}
 .btn-del-sm {
     color: #999;
     border-color: #ddd;
 }
-.btn-del-sm:hover {
-    background: #e74c3c;
-    color: white;
-    border-color: #e74c3c;
+
+.btn-loading {
+    background: #999 !important;
+    color: #fff !important;
+    border-color: #999 !important;
+    cursor: not-allowed;
+    opacity: 0.7;
 }
 
 /* Poems */
@@ -1212,16 +1192,30 @@ button:disabled {
     
     /* 缓存统计移动端适配 */
     .cache-stats-summary {
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: repeat(3, 1fr);
         gap: 12px;
+        padding-bottom: 0;
+        border-bottom: none;
+    }
+    .cache-stats-summary > .status-item:not(.status-bar-item) {
+        flex-direction: column;
+        text-align: center;
+        align-items: center;
+        padding-bottom: 0;
+        border-bottom: none;
+    }
+    .cache-stats-summary .status-bar-item {
+        grid-column: 1 / -1;
+        padding-top: 12px;
+        border-top: 1px solid var(--border);
     }
     .cache-table-header {
         display: none;
     }
     .cache-table-row {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px 12px;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 6px 10px;
         padding: 10px 12px;
     }
     .cache-table-row > div {
@@ -1236,7 +1230,7 @@ button:disabled {
         display: none;
     }
     .cache-name {
-        width: 100%;
+        grid-column: 1 / -1;
         font-weight: 600;
     }
     

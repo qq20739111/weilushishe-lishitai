@@ -424,6 +424,27 @@ function showCustomFieldErrors(errors) {
     });
 }
 
+/**
+ * 按钮加载状态管理器（防止重复提交）
+ * @param {HTMLElement} btn - 按钮元素
+ * @param {string} loadingText - 加载时显示的文本
+ * @param {Function} action - 异步操作函数
+ */
+async function withButtonLoading(btn, loadingText, action) {
+    if (!btn) return await action();
+    const oldText = btn.innerText;
+    btn.disabled = true;
+    btn.innerText = loadingText;
+    btn.classList.add('btn-loading');
+    try {
+        return await action();
+    } finally {
+        btn.classList.remove('btn-loading');
+        btn.innerText = oldText;
+        btn.disabled = false;
+    }
+}
+
 // --- 移动端菜单控制 ---
 function toggleMobileMenu() {
     const navLinks = document.getElementById('nav-links');
@@ -1246,10 +1267,6 @@ async function fetchPoems(isLoadMore = false) {
     } catch(e) { console.error(e); }
 }
 
-function loadMorePoems() {
-    fetchPoems(true);
-}
-
 function renderPoems() {
     const container = document.getElementById('poem-list');
     const isPoemAdmin = currentUser && ['super_admin', 'admin'].includes(currentUser.role);
@@ -1269,7 +1286,7 @@ function renderPoems() {
         loadMoreBtn.id = 'poem-load-more';
         loadMoreBtn.className = 'load-more-btn hidden';
         loadMoreBtn.innerText = '加载更多';
-        loadMoreBtn.onclick = loadMorePoems;
+        loadMoreBtn.onclick = () => fetchPoems(true);
         container.parentElement.appendChild(loadMoreBtn);
     }
     
@@ -1610,19 +1627,7 @@ async function withdrawPoem() {
 async function deletePoemWrapper(id, isLocal, event) {
     if(!confirm('确定永久删除这篇作品吗？(无法恢复)')) return;
     
-    // 获取按钮并禁用，防止重复提交
-    const btn = event?.target;
-    const oldText = btn ? btn.innerText : '';
-    const oldStyle = btn ? btn.style.cssText : '';
-    if (btn) {
-        btn.disabled = true;
-        btn.innerText = '删除中...';
-        btn.style.background = '#999';
-        btn.style.color = '#fff';
-        btn.style.borderColor = '#999';
-    }
-    
-    try {
+    await withButtonLoading(event?.target, '删除中...', async () => {
         if (isLocal) {
             await LocalDrafts.delete(id);
             fetchPoems();
@@ -1635,14 +1640,7 @@ async function deletePoemWrapper(id, isLocal, event) {
             if(res.ok) fetchPoems();
             else alert('删除失败');
         }
-    } catch(e) { console.error(e); }
-    finally {
-        if (btn) {
-            btn.style.cssText = oldStyle;
-            btn.innerText = oldText;
-            btn.disabled = false;
-        }
-    }
+    });
 }
 
 // Data Fetching
@@ -1810,10 +1808,6 @@ async function fetchMembers(isLoadMore = false) {
         console.error(e);
         if (!isLoadMore) showEmptyState('member-list', '😕', '加载失败，请刷新重试');
     }
-}
-
-function loadMoreMembers() {
-    fetchMembers(true);
 }
 
 function renderMembers() {
@@ -2145,19 +2139,7 @@ async function deleteMember(id, event) {
     
     if(!confirm('确定要移除该社员吗？此操作无法撤销。')) return;
     
-    // 获取按钮并禁用，防止重复提交
-    const btn = event?.target;
-    const oldText = btn ? btn.innerText : '';
-    const oldStyle = btn ? btn.style.cssText : '';
-    if (btn) {
-        btn.disabled = true;
-        btn.innerText = '删除中...';
-        btn.style.background = '#999';
-        btn.style.color = '#fff';
-        btn.style.borderColor = '#999';
-    }
-    
-    try {
+    await withButtonLoading(event?.target, '删除中...', async () => {
         const res = await fetch(`${API_BASE}/members/delete`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -2170,16 +2152,7 @@ async function deleteMember(id, event) {
             const error = await res.json().catch(() => ({}));
             alert('删除失败: ' + (error.error || '权限不足'));
         }
-    } catch(e) {
-        console.error('删除社员失败:', e);
-        alert('网络错误，请重试');
-    } finally {
-        if (btn) {
-            btn.style.cssText = oldStyle;
-            btn.innerText = oldText;
-            btn.disabled = false;
-        }
-    }
+    });
 }
 
 let _cachedFinance = [];
@@ -2254,10 +2227,6 @@ async function fetchFinance(isLoadMore = false) {
         console.error('获取财务记录失败:', e);
         if (!isLoadMore) alert('获取财务记录失败: ' + e.message);
     }
-}
-
-function loadMoreFinance() {
-    fetchFinance(true);
 }
 
 function renderFinance() {
@@ -2351,10 +2320,6 @@ async function fetchTasks(isLoadMore = false) {
         console.error(e);
         if (!isLoadMore) showEmptyState('task-list', '😕', '加载失败，请刷新重试');
     }
-}
-
-function loadMoreTasks() {
-    fetchTasks(true);
 }
 
 function renderTasks() {
@@ -2811,19 +2776,7 @@ async function rejectTask(taskId, event) {
 async function deleteTask(taskId, event) {
     if(!confirm('确认删除此任务？此操作不可恢复。')) return;
     
-    // 获取按钮并禁用，防止重复提交
-    const btn = event?.target;
-    const oldText = btn ? btn.innerText : '';
-    const oldStyle = btn ? btn.style.cssText : '';
-    if (btn) {
-        btn.disabled = true;
-        btn.innerText = '删除中...';
-        btn.style.background = '#999';
-        btn.style.color = '#fff';
-        btn.style.borderColor = '#999';
-    }
-    
-    try {
+    await withButtonLoading(event?.target, '删除中...', async () => {
         const res = await fetch(`${API_BASE}/tasks/delete`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -2836,16 +2789,7 @@ async function deleteTask(taskId, event) {
         } else {
             alert('删除失败');
         }
-    } catch(e) {
-        console.error(e);
-        alert('网络错误');
-    } finally {
-        if (btn) {
-            btn.style.cssText = oldStyle;
-            btn.innerText = oldText;
-            btn.disabled = false;
-        }
-    }
+    });
 }
 
 // ============================================================================
@@ -2888,10 +2832,6 @@ async function fetchActivities(isLoadMore = false) {
         
         renderActivities();
     } catch(e) { console.error(e); }
-}
-
-function loadMoreActivities() {
-    fetchActivities(true);
 }
 
 function renderActivities() {
@@ -3020,19 +2960,7 @@ async function submitActivity() {
 async function deleteActivity(id, event) {
     if(!confirm('确定删除此活动？')) return;
     
-    // 获取按钮并禁用，防止重复提交
-    const btn = event?.target;
-    const oldText = btn ? btn.innerText : '';
-    const oldStyle = btn ? btn.style.cssText : '';
-    if (btn) {
-        btn.disabled = true;
-        btn.innerText = '删除中...';
-        btn.style.background = '#999';
-        btn.style.color = '#fff';
-        btn.style.borderColor = '#999';
-    }
-    
-    try {
+    await withButtonLoading(event?.target, '删除中...', async () => {
         await fetch(`${API_BASE}/activities/delete`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -3040,68 +2968,7 @@ async function deleteActivity(id, event) {
         });
         fetchActivities();
         loadSystemInfo(); // Refresh Home list too
-    } finally {
-        if (btn) {
-            btn.style.cssText = oldStyle;
-            btn.innerText = oldText;
-            btn.disabled = false;
-        }
-    }
-}
-
-// Submissions
-async function submitPoem() {
-    const submitBtn = document.querySelector('#modal-poem button');
-    const originalText = submitBtn.innerText;
-    submitBtn.innerText = '提交中...';
-    submitBtn.disabled = true;
-
-    try {
-        const data = {
-            title: document.getElementById('p-title').value,
-            // Automatically use current user alias or name
-            author: (currentUser.alias && currentUser.alias.trim()) ? currentUser.alias : currentUser.name,
-            author_id: currentUser.id,  // 存储作者ID用于动态查找
-            type: document.getElementById('p-type').value,
-            content: document.getElementById('p-content').value,
-            date: new Date().toISOString().split('T')[0]
-        };
-
-        if (!data.title || !data.content) {
-            alert("请填写完整的诗词/文章信息");
-            return;
-        }
-        
-        let url = `${API_BASE}/poems`;
-        if (editingPoemId) {
-            url = `${API_BASE}/poems/update`;
-            data.id = editingPoemId;
-            // keep original date or author? Backend updates title/content/type only.
-        }
-
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(data)
-        });
-
-        if (!response.ok) {
-            throw new Error(`Server Error: ${response.status}`);
-        }
-        
-        // Clear inputs
-        document.getElementById('p-title').value = '';
-        document.getElementById('p-content').value = '';
-
-        toggleModal('modal-poem');
-        showSection('poems'); // This triggers fetchPoems()
-    } catch (error) {
-        console.error('Submission failed:', error);
-        alert('提交失败: ' + error.message);
-    } finally {
-        submitBtn.innerText = originalText;
-        submitBtn.disabled = false;
-    }
+    });
 }
 
 function openFinanceModal(id = null) {
@@ -3183,18 +3050,7 @@ async function submitFinance() {
 async function deleteFinance(id, event) {
     if (!confirm('确定删除此财务记录？此操作不可撤销。')) return;
     
-    const btn = event?.target;
-    const oldText = btn ? btn.innerText : '';
-    const oldStyle = btn ? btn.style.cssText : '';
-    if (btn) {
-        btn.disabled = true;
-        btn.innerText = '删除中...';
-        btn.style.background = '#999';
-        btn.style.color = '#fff';
-        btn.style.borderColor = '#999';
-    }
-    
-    try {
+    await withButtonLoading(event?.target, '删除中...', async () => {
         const res = await fetchWithAuth(`${API_BASE}/finance/delete`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -3206,15 +3062,7 @@ async function deleteFinance(id, event) {
             const err = await res.json().catch(() => ({}));
             alert('删除失败: ' + (err.error || '未知错误'));
         }
-    } catch(e) {
-        alert('网络错误，请重试');
-    } finally {
-        if (btn) {
-            btn.style.cssText = oldStyle;
-            btn.innerText = oldText;
-            btn.disabled = false;
-        }
-    }
+    });
 }
 
 let _homeActivities = []; // Store for home usage
@@ -3422,9 +3270,9 @@ async function loadSystemInfo() {
                     const percent = Math.min(100, Math.max(0, temp));
                     cpuTempBarEl.style.width = `${percent}%`;
                     // 根据温度设置进度条颜色
-                    cpuTempBarEl.classList.remove('warm', 'hot');
-                    if(temp > 80) cpuTempBarEl.classList.add('hot');
-                    else if(temp > 60) cpuTempBarEl.classList.add('warm');
+                    cpuTempBarEl.classList.remove('warning', 'danger');
+                    if(temp > 80) cpuTempBarEl.classList.add('danger');
+                    else if(temp > 60) cpuTempBarEl.classList.add('warning');
                 } else {
                     cpuTempTextEl.innerText = '不支持';
                     cpuTempBarEl.style.width = '0%';
@@ -3444,17 +3292,17 @@ async function loadSystemInfo() {
                 // 映射为百分比: (-100 - rssi) / -70 * 100
                 const percent = Math.min(100, Math.max(0, (rssi + 100) / 70 * 100));
                 
-                wifiBarEl.classList.remove('weak', 'poor');
+                wifiBarEl.classList.remove('warning', 'danger');
                 if(rssi >= -50) {
                     signalText = '极好';
                 } else if(rssi >= -60) {
                     signalText = '良好';
                 } else if(rssi >= -70) {
                     signalText = '一般';
-                    wifiBarEl.classList.add('weak');
+                    wifiBarEl.classList.add('warning');
                 } else {
                     signalText = '较弱';
-                    wifiBarEl.classList.add('poor');
+                    wifiBarEl.classList.add('danger');
                 }
                 
                 wifiTextEl.innerText = `${ssid} (${rssi}dBm ${signalText})`;

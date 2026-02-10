@@ -19,7 +19,7 @@ try:
     from lib.Settings import (get_settings, save_settings,
         invalidate_settings_cache, SETTINGS_KEYS, DEFAULT_TOKEN_EXPIRE_DAYS)
     from lib.Auth import (hash_password, verify_password, generate_token,
-        verify_token, check_token, simple_unquote)
+        verify_token, check_token, extract_token, simple_unquote)
     info("main.py 模块导入成功", "Init")
 except ImportError as e:
     print(f"\n[CRITICAL] 导入失败: {e}")
@@ -260,12 +260,7 @@ def get_operator_role(request):
     优先从缓存读取角色，未命中时按ID查找单条记录
     """
     try:
-        data = request.json if request.json else {}
-        
-        # 从Header或请求体获取Token
-        token = request.headers.get('authorization', '').replace('Bearer ', '')
-        if not token:
-            token = data.get('token', '')
+        token = extract_token(request)
         
         if not token:
             return None, None
@@ -297,10 +292,7 @@ def require_login(f):
     用法：@require_login
     """
     def wrapper(request, *args, **kwargs):
-        data = request.json if request.json else {}
-        token = request.headers.get('authorization', '').replace('Bearer ', '')
-        if not token:
-            token = data.get('token', '')
+        token = extract_token(request)
         
         if not token:
             return Response('{"error": "请先登录"}', 401, {'Content-Type': 'application/json'})
@@ -337,38 +329,6 @@ def check_permission(request, allowed_roles):
     if role not in allowed_roles:
         return False, Response('{"error": "权限不足"}', 403, {'Content-Type': 'application/json'})
     return True, None
-
-def check_login(request):
-    """检查请求是否已登录（供特殊场景调用）"""
-    data = request.json if request.json else {}
-    token = request.headers.get('authorization', '').replace('Bearer ', '')
-    if not token:
-        token = data.get('token', '')
-    
-    if not token:
-        return False, None, Response('{"error": "请先登录"}', 401, {'Content-Type': 'application/json'})
-    
-    valid, user_id, err_msg = verify_token(token)
-    if valid:
-        return True, user_id, None
-    else:
-        return False, None, Response(json.dumps({"error": err_msg}), 401, {'Content-Type': 'application/json'})
-
-def check_login_get(request):
-    """
-    检查 GET 请求是否已登录（通过Token验证）
-    返回: (已登录, 错误响应或None)
-    """
-    token = request.headers.get('authorization', '').replace('Bearer ', '')
-    
-    if not token:
-        return False, Response('{"error": "请先登录"}', 401, {'Content-Type': 'application/json'})
-    
-    valid, user_id, err_msg = verify_token(token)
-    if valid:
-        return True, None
-    else:
-        return False, Response(json.dumps({"error": err_msg}), 401, {'Content-Type': 'application/json'})
 
 def record_points_change(member_id, member_name, change, reason):
     """记录积分变动日志"""
@@ -980,7 +940,7 @@ def list_members(request):
         
         # 非公开模式需要登录
         if not public_mode:
-            ok, _, err = check_login(request)
+            ok, _, err = check_token(request)
             if not ok:
                 return err
         
@@ -1197,7 +1157,7 @@ def update_member_route(request):
 def change_password_route(request):
     """用户修改自己的密码（需要登录，只能改自己的）"""
     # 登录验证
-    ok, user_id, err = check_login(request)
+    ok, user_id, err = check_token(request)
     if not ok:
         return err
     
@@ -1379,7 +1339,7 @@ def login_route(request):
 def update_profile(request):
     """更新个人资料（需要登录，只能修改自己的资料）"""
     # 登录验证
-    ok, token_user_id, err = check_login(request)
+    ok, token_user_id, err = check_token(request)
     if not ok:
         return err
     

@@ -108,16 +108,20 @@ def verify_token(token):
         return False, None, "Token解析失败"
 
 
+def extract_token(request):
+    """从请求中提取Token（优先Header，回退到请求体）"""
+    token = request.headers.get('authorization', '').replace('Bearer ', '')
+    if not token and request.json:
+        token = request.json.get('token', '')
+    return token
+
+
 def check_token(request):
     """
     从请求中验证Token（支持Header和请求体两种方式）
     返回: (是否有效, user_id或None, 错误响应或None)
     """
-    # 从Header获取
-    token = request.headers.get('authorization', '').replace('Bearer ', '')
-    # POST请求也尝试从body获取
-    if not token and request.json:
-        token = request.json.get('token', '')
+    token = extract_token(request)
     
     valid, user_id, err_msg = verify_token(token)
     if not valid:

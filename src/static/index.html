@@ -215,7 +215,7 @@
                             <span class="status-text" id="admin-wifi-signal-text">-</span>
                         </div>
                         <div class="status-bar">
-                            <div class="status-bar-fill status-bar-wifi" id="admin-wifi-signal-bar"></div>
+                            <div class="status-bar-fill" id="admin-wifi-signal-bar"></div>
                         </div>
                     </div>
                 </div>
@@ -617,7 +617,7 @@
             
             <div id="poem-list"></div>
             
-            <button id="poem-load-more" class="load-more-btn hidden" onclick="loadMorePoems()">查看更多作品</button>
+            <button id="poem-load-more" class="load-more-btn hidden" onclick="fetchPoems(true)">查看更多作品</button>
         </section>
 
         <!-- Activities Section -->
@@ -627,7 +627,7 @@
                 <button onclick="openActivityModal()" id="btn-add-activity" class="hidden">发起活动</button>
             </div>
             <div id="activity-list"></div>
-            <button id="activity-load-more" class="load-more-btn hidden" onclick="loadMoreActivities()">查看更多活动</button>
+            <button id="activity-load-more" class="load-more-btn hidden" onclick="fetchActivities(true)">查看更多活动</button>
         </section>
 
         <!-- Finance Section -->
@@ -656,7 +656,7 @@
                 <thead><tr><th>日期</th><th>摘要</th><th>金额</th><th>经办</th><th id="finance-op-th" class="hidden">操作</th></tr></thead>
                 <tbody id="finance-list"></tbody>
             </table>
-            <button id="finance-load-more" class="load-more-btn hidden" onclick="loadMoreFinance()">查看更多记录</button>
+            <button id="finance-load-more" class="load-more-btn hidden" onclick="fetchFinance(true)">查看更多记录</button>
         </section>
 
         <!-- Tasks Section -->
@@ -666,7 +666,7 @@
                 <button onclick="openTaskModal()" id="btn-add-task" class="hidden">发布事务</button>
             </div>
             <div id="task-list"></div>
-            <button id="task-load-more" class="load-more-btn hidden" onclick="loadMoreTasks()">查看更多事务</button>
+            <button id="task-load-more" class="load-more-btn hidden" onclick="fetchTasks(true)">查看更多事务</button>
         </section>
 
         <!-- Members Section -->
@@ -676,7 +676,7 @@
                 <button onclick="openMemberModal()" id="btn-add-member" class="hidden">录入社员</button>
             </div>
             <div id="member-list" class="grid"></div>
-            <button id="member-load-more" class="load-more-btn hidden" onclick="loadMoreMembers()">查看更多社员</button>
+            <button id="member-load-more" class="load-more-btn hidden" onclick="fetchMembers(true)">查看更多社员</button>
         </section>
     </main>
 
