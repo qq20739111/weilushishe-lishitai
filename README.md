@@ -20,6 +20,8 @@
 - **数据备份 (Data Backup)**: 支持全量备份导出/导入，以及单表数据的独立导出/导入。
 - **WiFi 管理**: 支持 STA/AP 自动切换、静态 IP 配置、自动重连机制及 NTP 时间同步（阿里云 NTP 服务器）。
 - **视觉反馈**: 通过呼吸灯 (BreathLED) 实时反馈系统工作状态。
+- **登录日志 (Login Audit)**: 记录所有用户登录行为（成功/失败），包含 IP、时间戳等信息，支持安全审计追踪。
+- **缓存统计 (Cache Monitoring)**: 实时监控内存缓存命中率、过期率与使用情况（超级管理员专属）。
 
 ## 🔐 安全特性
 
@@ -31,6 +33,7 @@
 - **游客访问**: 可配置是否允许未登录用户浏览公开内容（首页、诗歌、活动、成员等）。
 - **XSS 防护**: 集成 DOMPurify 对 Markdown 渲染内容进行 XSS 过滤。
 - **看门狗机制**: 自动喂狗定时器，防止系统死锁。
+- **审计追踪**: 完整记录登录日志（IP、时间戳、成功/失败状态），支持安全事件回溯。
 
 ## 🔑 角色权限体系
 
@@ -97,37 +100,83 @@
 
 ## 🚀 软件架构
 
-- **后端框架**: [Microdot](lib/microdot.py) - 专为微控制器优化的轻量级 Web 框架。
-- **数据库**: **JSONL (JSON Lines)** - 流式数据库系统，支持在极低内存下处理大数据文件。
-- **网络管理**: [WifiConnector](lib/WifiConnector.py) - 增强型网络连接器，支持静态 IP 及 STA/AP 自动切换。
-- **系统监控**: [SystemStatus](lib/SystemStatus.py) - 状态指示灯控制与系统状态管理。
-- **日志系统**: [Logger](lib/Logger.py) - 分级日志系统，支持开发/生产环境切换。
-- **看门狗**: [Watchdog](lib/Watchdog.py) - 防系统锁死机制，可配置超时时间。
-- **前端技术**: 原生 HTML5 / CSS3 / JavaScript (ES6+)，采用 SPA (单页应用) 架构，集成 [marked.js](https://marked.js.org/) Markdown 渲染及 [DOMPurify](https://github.com/cure53/DOMPurify) XSS 防护。
+### 核心组件库 (src/lib/)
+
+**网络与通信**
+- **[Microdot](src/lib/microdot.py)** - 专为微控制器优化的轻量级 Web 框架（第三方）。
+- **[WifiConnector](src/lib/WifiConnector.py)** - 增强型网络连接器，支持静态 IP、STA/AP 自动切换、断线重连及 NTP 时间同步。
+
+**数据存储与缓存**
+- **[JsonlDB](src/lib/JsonlDB.py)** - JSONL 流式数据库引擎，支持行偏移分页、搜索优化、原子更新，适配极低内存环境。
+- **[CacheManager](src/lib/CacheManager.py)** - 统一内存缓存管理器，支持 dict/list/value/const 四种槽类型、TTL 过期及容量控制。
+
+**安全与认证**
+- **[Auth](src/lib/Auth.py)** - Token 认证与密码管理，SHA256 加盐哈希，运行时签名密钥（重启失效）。
+- **[Validator](src/lib/Validator.py)** - 数据验证器，支持手机号、密码强度、姓名、生日、积分及自定义字段验证。
+
+**系统管理**
+- **[Settings](src/lib/Settings.py)** - 系统配置管理，提供缓存层减少 Flash 读写。
+- **[Logger](src/lib/Logger.py)** - 分级日志系统（DEBUG/INFO/WARN/ERROR），支持开发/生产环境切换。
+- **[Watchdog](src/lib/Watchdog.py)** - 看门狗机制，防系统锁死，可配置超时时间（10-600 秒）。
+
+**硬件控制**
+- **[BreathLED](src/lib/BreathLED.py)** - 呼吸灯控制器，正弦表预计算优化，支持 WS2812 和普通 LED，多状态指示。
+- **[SystemStatus](src/lib/SystemStatus.py)** - LED 状态指示器，封装连接中/AP 模式/运行中/双模式等视觉反馈逻辑。
+
+### 前端技术栈
+
+- 原生 **HTML5 / CSS3 / JavaScript (ES6+)**，采用 **SPA (单页应用)** 架构，通过 `showSection()` 切换视图。
+- **响应式设计**: 移动端 (<768px) / 平板端 (<1280px) / PC 端 (>=1280px) 三端适配。
+- **CSS 变量主题系统**: 9 个全局 CSS 变量统一主题色与风格。
+- **本地存储**: `localStorage`（用户状态）+ `IndexedDB`（诗歌草稿离线编辑）。
+- **Markdown 渲染**: [marked.js](https://marked.js.org/) + **XSS 防护**: [DOMPurify](https://github.com/cure53/DOMPurify)。
 
 ## 📂 目录结构
 
-根据 [技术开发规范 (rules.md)](rules.md) 的要求，项目采用以下结构：
+根据 [技术开发规范 (rules.md)](.qoder/rules/rules.md) 的要求，项目采用以下结构：
 
 ```text
 .
-├── doc/                # 项目参考资料与说明文档
-├── src/                # 源代码根目录
-│   ├── boot.py         # 系统启动引导程序 (硬件初始化/网络连接)
-│   ├── main.py         # 主应用程序入口 (路由定义/业务逻辑)
-│   ├── lib/            # 核心功能组件库
-│   ├── data/           # 持久化 JSON/JSONL 数据文件
-│   └── static/         # 前端 Web 资源 (HTML/CSS/JS)
-│       ├── index.html   # 主页面
-│       ├── style.css    # 全局样式
-│       ├── app.js       # 应用逻辑
-│       ├── logo.png     # 站点图标
-│       ├── marked.umd.js    # Markdown 渲染库
-│       └── purify.min.js    # DOMPurify XSS 防护库
-├── rules.md            # 技术开发规范
-└── README.md           # 本说明文档
+├── .qoder/                    # Qoder AI 开发助手配置
+│   └── rules/
+│       └── rules.md           # 技术开发规范
+├── doc/                       # 项目参考资料与说明文档
+│   └── sch_s2_mini_v1.0.0.pdf # 硬件原理图
+├── src/                       # 源代码根目录
+│   ├── boot.py                # 系统启动引导程序 (硬件初始化/网络连接)
+│   ├── main.py                # 主应用程序入口 (路由定义/业务逻辑)
+│   ├── lib/                   # 核心功能组件库 (11 个模块)
+│   │   ├── Auth.py            # Token 认证与密码管理
+│   │   ├── BreathLED.py       # 呼吸灯控制
+│   │   ├── CacheManager.py    # 缓存管理器
+│   │   ├── JsonlDB.py         # JSONL 数据库引擎
+│   │   ├── Logger.py          # 日志系统
+│   │   ├── Settings.py        # 系统设置管理
+│   │   ├── SystemStatus.py    # LED 状态指示
+│   │   ├── Validator.py       # 数据验证器
+│   │   ├── Watchdog.py        # 看门狗机制
+│   │   ├── WifiConnector.py   # WiFi 管理
+│   │   └── microdot.py        # Web 框架 (第三方)
+│   ├── data/                  # 持久化 JSON/JSONL 数据文件
+│   │   ├── config.json        # 系统配置
+│   │   ├── members.jsonl      # 成员信息
+│   │   ├── poems.jsonl        # 诗歌数据
+│   │   ├── activities.jsonl   # 活动记录
+│   │   ├── tasks.jsonl        # 任务事务
+│   │   ├── finance.jsonl      # 财务记录
+│   │   ├── points_logs.jsonl  # 积分日志
+│   │   └── login_logs.jsonl   # 登录日志 (审计追踪)
+│   └── static/                # 前端 Web 资源 (HTML/CSS/JS)
+│       ├── index.html         # 主页面
+│       ├── style.css          # 全局样式
+│       ├── app.js             # 应用逻辑
+│       ├── logo.png           # 站点图标
+│       ├── marked.umd.js      # Markdown 渲染库 (第三方)
+│       └── purify.min.js      # DOMPurify XSS 防护库 (第三方)
+├── .gitignore                 # Git 忽略规则
+├── LICENSE                    # GPL V3 开源许可证
+└── README.md                  # 本说明文档
 ```
-*注：当前部署中，源代码文件直接位于根目录下。*
 
 ## 📥 安装与部署
 
@@ -141,7 +190,7 @@
 
 ## 规范与原则
 
-后续开发请严格遵守 [rules.md](rules.md) 中的定义：
+后续开发请严格遵守 [.qoder/rules/rules.md](.qoder/rules/rules.md) 中的定义：
 - **内存优先**: 必须通过逐行读取和 `gc.collect()` 严格控制内存占用。
 - **中文标准**: 代码注释、界面文字统一使用中文。
 - **异步交互**: 前端必须使用 `async/await` 处理所有网络请求。

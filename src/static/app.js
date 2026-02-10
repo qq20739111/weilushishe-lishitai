@@ -3236,7 +3236,7 @@ async function loadSystemInfo() {
             // Storage progress bar
             const usedStorage = total - free;
             const storagePercent = Math.round((usedStorage / total) * 100);
-            document.getElementById('admin-storage-text').innerText = `${free} KB 可用 / ${total} KB`;
+            document.getElementById('admin-storage-text').innerText = `${usedStorage} KB / ${total} KB`;
             const storageBar = document.getElementById('admin-storage-bar');
             storageBar.style.width = `${storagePercent}%`;
             if(storagePercent > 90) storageBar.className = 'status-bar-fill danger';
@@ -3246,7 +3246,7 @@ async function loadSystemInfo() {
             // RAM progress bar
             const usedRam = totalRam - freeRam;
             const ramPercent = Math.round((usedRam / totalRam) * 100);
-            document.getElementById('admin-ram-text').innerText = `${freeRam} KB 可用 / ${totalRam} KB`;
+            document.getElementById('admin-ram-text').innerText = `${usedRam} KB / ${totalRam} KB`;
             const ramBar = document.getElementById('admin-ram-bar');
             ramBar.style.width = `${ramPercent}%`;
             if(ramPercent > 90) ramBar.className = 'status-bar-fill danger';
@@ -3257,6 +3257,12 @@ async function loadSystemInfo() {
             const sysTimeEl = document.getElementById('admin-system-time');
             if(sysTimeEl && info.system_time) {
                 sysTimeEl.innerText = info.system_time;
+            }
+            
+            // 系统运行时间显示
+            const uptimeEl = document.getElementById('admin-uptime');
+            if (uptimeEl && info.uptime_seconds !== undefined) {
+                uptimeEl.innerText = formatUptime(info.uptime_seconds);
             }
             
             // CPU温度显示 (进度条风格)
@@ -4163,6 +4169,20 @@ function formatBytes(bytes) {
     let val = bytes;
     while(val >= 1024 && i < units.length - 1) { val /= 1024; i++; }
     return val.toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+}
+
+// 格式化系统运行时间为中文友好格式
+function formatUptime(seconds) {
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    const parts = [];
+    if (days > 0) parts.push(`${days} 天`);
+    if (hours > 0) parts.push(`${hours} 小时`);
+    if (minutes > 0) parts.push(`${minutes} 分钟`);
+    if (parts.length === 0 || (days === 0 && hours === 0)) parts.push(`${secs} 秒`);
+    return parts.join('');
 }
 
 // --- 登录日志 ---

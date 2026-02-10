@@ -174,10 +174,21 @@
             <div class="card">
                 <h3>设备状态</h3>
                 <div class="system-status-grid">
-                    <div class="status-item">
+                    <!-- 第1行：文本信息 -->
+                    <div class="status-item status-text-item">
                         <span class="status-label">设备</span>
                         <span class="status-value" id="admin-platform">-</span>
                     </div>
+                    <div class="status-item status-text-item">
+                        <span class="status-label">系统时间</span>
+                        <span class="status-value status-time" id="admin-system-time">-</span>
+                    </div>
+                    <div class="status-item status-text-item">
+                        <span class="status-label">系统运行时间</span>
+                        <span class="status-value" id="admin-uptime">-</span>
+                    </div>
+                    <div class="status-grid-divider"></div>
+                    <!-- 第2行：存储 + 内存 -->
                     <div class="status-item status-bar-item">
                         <div class="status-bar-header">
                             <span class="status-label">数据存储空间（Flash）</span>
@@ -196,10 +207,7 @@
                             <div class="status-bar-fill" id="admin-ram-bar"></div>
                         </div>
                     </div>
-                    <div class="status-item">
-                        <span class="status-label">系统时间</span>
-                        <span class="status-value status-time" id="admin-system-time">-</span>
-                    </div>
+                    <!-- 第3行：温度 + WiFi -->
                     <div class="status-item status-bar-item">
                         <div class="status-bar-header">
                             <span class="status-label">CPU温度</span>

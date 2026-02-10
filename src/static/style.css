@@ -225,9 +225,25 @@ button:disabled {
 /* System Status - Modern Style */
 .system-status-grid {
     display: grid;
-    grid-template-columns: auto 1fr 1fr;
-    gap: 20px;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 20px 16px;
     align-items: center;
+}
+
+/* 文本信息项：每项占2列（3项 x 2列 = 6列） */
+.status-text-item {
+    grid-column: span 2;
+}
+
+/* 进度条项：每项占3列（2项 x 3列 = 6列） */
+.system-status-grid .status-bar-item {
+    grid-column: span 3;
+}
+
+/* 文本行与进度条行之间的分割线 */
+.status-grid-divider {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--border);
 }
 
 .status-item {
@@ -1166,6 +1182,10 @@ button:disabled {
     .system-status-grid {
         grid-template-columns: 1fr;
         gap: 15px;
+    }
+    .status-text-item,
+    .system-status-grid .status-bar-item {
+        grid-column: span 1;
     }
     
     .status-item:first-child {
