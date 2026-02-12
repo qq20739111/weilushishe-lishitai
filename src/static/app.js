@@ -4117,7 +4117,7 @@ async function loadCacheStats() {
             const memPct = Math.round(memUsed / memTotal * 100);
             const memBar = document.getElementById('cache-memory-bar');
             const memText = document.getElementById('cache-memory-text');
-            memText.innerText = formatBytes(memFree) + ' / ' + formatBytes(memTotal);
+            memText.innerText = formatBytes(memUsed) + ' / ' + formatBytes(memTotal);
             memBar.style.width = memPct + '%';
             memBar.className = 'status-bar-fill' + (memPct > 85 ? ' danger' : memPct > 70 ? ' warning' : '');
         }
